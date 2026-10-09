@@ -1,0 +1,12 @@
+{
+  "name": "devteam-marketplace",
+  "description": "A goal-gated, token-lean software team of agents for Claude Code.",
+  "owner": { "name": "Raghav Rajvanshi" },
+  "plugins": [
+    {
+      "name": "devteam",
+      "source": "./plugins/devteam",
+      "description": "Goal-gated, token-lean software team of agents: Goal Keeper, PM, Architect, engineers, QA and Reviewer."
+    }
+  ]
+}

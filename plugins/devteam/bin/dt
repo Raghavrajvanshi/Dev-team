@@ -1,0 +1,473 @@
+#!/usr/bin/env perl
+# dt: the deterministic side of devteam. Skills call it; it owns state, criteria, gates and the close gate.
+use strict;
+use warnings;
+use FindBin;
+use lib "$FindBin::Bin/../lib";
+use JSON::PP;
+use File::Path qw(make_path);
+use DT qw(root ddir slurp spit jread jwrite ts true false default_state default_config state_read state_write
+  config_read config_write goal_dir seal check_seal sha_file git_out tree_key run_cmd ledger_add
+  locked update_state run_gates);
+
+my $MIN_CLAUDE = '2.1.295';
+my $PLUGIN = "$FindBin::Bin/..";
+my %NEXT = (
+    IDLE => [qw(INTAKE ONBOARDING STOPPED)], ONBOARDING => [qw(IDLE STOPPED)],
+    INTAKE => [qw(ACTIVE PAUSED IDLE STOPPED)], ACTIVE => [qw(PAUSED BLOCKED VERIFYING STOPPED)],
+    PAUSED => [qw(ACTIVE STOPPED)], BLOCKED => [qw(ACTIVE PAUSED STOPPED)],
+    VERIFYING => [qw(ACTIVE BLOCKED ACHIEVED STOPPED)], ACHIEVED => [qw(IDLE)], STOPPED => [qw(IDLE)],
+);
+my @MODELS = qw(opus sonnet haiku inherit);
+my @EFFORTS = qw(low medium high xhigh max);
+my %CMD = (
+    init => \&c_init, gitignore => \&c_gitignore, preflight => \&c_preflight, state => \&c_state,
+    engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
+    verify => \&c_verify, gate => \&c_gate, close => \&c_close, lifecycle => \&c_lifecycle,
+    models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
+    resync => \&c_resync, ledger => \&c_ledger,
+);
+
+my $cmd = shift @ARGV // '';
+if (!$CMD{$cmd}) { print STDERR "usage: dt <" . join('|', sort keys %CMD) . "> ...\n"; exit 2 }
+our $EXIT = 0;
+my %LOCKED = map { $_ => 1 } qw(state engage disengage goal grant branch resync criteria models);
+eval { $LOCKED{$cmd} ? locked(sub { $CMD{$cmd}->(@ARGV) }) : $CMD{$cmd}->(@ARGV); 1 } or do { print STDERR $@; exit 1 };
+exit $EXIT;
+
+sub opts {
+    my (%o, @p);
+    while (@_) {
+        my $a = shift;
+        if ($a =~ /^--([\w-]+)=(.*)$/s) { $o{$1} = $2 }
+        elsif ($a =~ /^--([\w-]+)$/) { $o{$1} = (@_ && $_[0] !~ /^--/) ? shift : 1 }
+        else { push @p, $a }
+    }
+    return (\%o, \@p);
+}
+sub need_init { -f ddir() . '/state.json' or die "dt: not initialised, run: dt init\n" }
+sub goal_file { my ($n) = @_; my $g = goal_dir() or die "dt: no active goal\n"; "$g/$n" }
+sub vcmp { my @a = split /\./, shift; my @b = split /\./, shift; for (0 .. 2) { my $d = ($a[$_] // 0) <=> ($b[$_] // 0); return $d if $d } 0 }
+sub lifecycle_dirs { (ddir() . '/lifecycles', "$PLUGIN/lifecycles") }
+sub lifecycle_names {
+    my %n;
+    for my $d (lifecycle_dirs()) { for my $f (glob "$d/*.md") { (my $b = $f) =~ s{.*/|\.md$}{}g; $n{$b} = 1 unless $b =~ /^_/ } }
+    return sort keys %n;
+}
+
+sub c_init {
+    my $d = ddir();
+    make_path("$d/$_") for qw(goals adr discussions reports);
+    jwrite("$d/config.json", default_config()) unless -f "$d/config.json";
+    jwrite("$d/state.json", default_state()) unless -f "$d/state.json";
+    seal();
+    print "initialised $d\n";
+}
+
+sub c_gitignore {
+    my $f = root() . '/.gitignore';
+    my $c = slurp($f) // '';
+    my @add = grep { $c !~ /^\Q$_\E\s*$/m } ('.devteam/', '.claude/worktrees/');
+    return print "gitignore: already ok\n" unless @add;
+    spit($f, $c . ($c =~ /\n\z|^\z/ ? '' : "\n") . join('', map {"$_\n"} @add));
+    print "gitignore: added " . join(', ', @add) . "\n";
+}
+
+sub c_preflight {
+    my $root = root();
+    my ($bad, @out) = (0);
+    my $add = sub { my ($ok, $n, $d) = @_; $bad++ if $ok eq 'FAIL'; push @out, sprintf('%-4s %s: %s', $ok, $n, $d) };
+    my $v = $ENV{DT_CLAUDE_VERSION} // (`claude --version 2>/dev/null` =~ /(\d+\.\d+\.\d+)/ ? $1 : '');
+    $v ? ($add->(vcmp($v, $MIN_CLAUDE) >= 0 ? 'ok' : 'FAIL', 'claude-version', "$v (need >= $MIN_CLAUDE)")) : $add->('FAIL', 'claude-version', 'claude not found');
+    my $head = git_out($root, 'rev-parse', '--verify', '-q', 'HEAD');
+    $add->($head ? 'ok' : 'FAIL', 'git', $head ? 'repository with at least one commit' : 'not a git repository with a commit (offer: git init + initial commit)');
+    my $dirty = $head ? git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') : '';
+    $add->($dirty eq '' ? 'ok' : 'FAIL', 'clean-tree', $dirty eq '' ? 'working tree clean' : 'uncommitted changes: ' . (split /\n/, $dirty)[0] . ' ...');
+    for my $f ("$PLUGIN/bin/dt", "$PLUGIN/hooks/hook.sh") {
+        $add->(-x $f ? 'ok' : 'FAIL', 'executable', $f =~ s{.*/}{}r . (-x $f ? '' : ' missing or not executable'));
+    }
+    my $g = (config_read()->{gates} // {});
+    $add->((grep { $g->{$_} } qw(test typecheck format)) ? 'ok' : 'warn', 'gates', (grep { $g->{$_} } qw(test typecheck format)) ? 'configured' : 'not configured: gates will report "not configured"');
+    print "$_\n" for @out;
+    $EXIT = 1 if $bad;
+    return;
+}
+
+sub c_state {
+    my ($sub, @a) = @_;
+    need_init();
+    my $s = state_read();
+    $sub //= 'show';
+    if ($sub eq 'show') { print JSON::PP->new->canonical->pretty->encode($s); return }
+    if ($sub eq 'get') { my $v = $s->{ $a[0] // '' }; print ref $v ? encode_json($v) : ($v // ''), "\n"; return }
+    if ($sub eq 'set') {
+        for my $kv (@a) {
+            my ($k, $v) = split /=/, $kv, 2;
+            die "dt: unknown or protected state key '$k'\n" unless defined $v && exists default_state()->{$k} && $k !~ /^(?:status|engaged|owner_session|retries|git_grants|queue)$/;
+            $s->{$k} = $k =~ /^(?:spawns|spawn_cap|main_turns|turn_cap|returns|ledger_offset)$/ ? $v + 0 : $k eq 'adhoc' ? ($v =~ /^(?:1|true|yes)$/ ? true : false) : $v;
+        }
+        return state_write($s);
+    }
+    if ($sub eq 'transition') { my ($to, @why) = @a; return transition($s, $to, join(' ', @why)) }
+    die "dt state: show|get K|set K=V...|transition STATUS [reason]\n";
+}
+
+sub transition {
+    my ($s, $to, $why) = @_;
+    my $from = $s->{status};
+    die "dt: unknown status '$to'\n" unless $NEXT{ $to // '' };
+    die "dt: ACHIEVED is reached only through 'dt close'\n" if $to eq 'ACHIEVED';
+    die "dt: BLOCKED needs a reason\n" if $to eq 'BLOCKED' && !length $why;
+    die "dt: illegal transition $from -> $to\n" unless $to eq 'STOPPED' || grep { $_ eq $to } @{ $NEXT{$from} };
+    $s->{status} = $to;
+    $s->{blocked_reason} = $to eq 'BLOCKED' ? $why : '';
+    $s->{adhoc} = false;
+    state_write($s);
+    ledger_add({ event => 'transition', from => $from, to => $to, why => $why });
+    print "$from -> $to\n";
+}
+
+sub c_engage {
+    my ($sid) = @_;
+    die "usage: dt engage <session_id>\n" unless $sid;
+    c_init() unless -f ddir() . '/state.json';
+    my $s = state_read();
+    @$s{qw(engaged owner_session)} = (true, $sid);
+    state_write($s);
+    print "engaged for session $sid\n";
+}
+sub c_disengage { need_init(); my $s = state_read(); @$s{qw(engaged owner_session)} = (false, ''); state_write($s); print "disengaged\n" }
+
+sub c_goal {
+    my ($sub, @a) = @_;
+    need_init();
+    my $s = state_read();
+    if (($sub // '') eq 'new') {
+        die "dt: a goal can start only from IDLE (status is $s->{status})\n" unless $s->{status} eq 'IDLE';
+        my $title = join ' ', @a;
+        die "usage: dt goal new <title>\n" unless length $title;
+        my ($max) = sort { $b <=> $a } map { /G-(\d+)$/ ? $1 : () } glob ddir() . '/goals/G-*';
+        my $id = sprintf 'G-%03d', ($max // 0) + 1;
+        my $dir = ddir() . "/goals/$id";
+        make_path("$dir/evidence");
+        my $t = slurp("$PLUGIN/templates/goal.md") // "# {{id}}: {{title}}\n";
+        $t =~ s/\{\{id\}\}/$id/g;
+        $t =~ s/\{\{title\}\}/$title/g;
+        spit("$dir/goal.md", $t);
+        jwrite("$dir/criteria.json", { criteria => [], locks => {} });
+        @$s{qw(goal lane lifecycle spawns spawn_cap main_turns turn_cap returns)} = ($id, '', '', 0, 0, 0, 0, 0);
+        @$s{qw(retries git_grants blocked_reason ledger_offset integration_branch original_branch original_sha)} = ({}, {}, '', 0, '', '', '');
+        $s->{status} = 'INTAKE';
+        state_write($s);
+        ledger_add({ event => 'goal_new', goal => $id, title => $title });
+        return print "$id created (INTAKE): $dir/goal.md\n";
+    }
+    if (($sub // '') eq 'confirm') {
+        my ($o) = opts(@a);
+        die "dt: goal can be confirmed only from INTAKE\n" unless $s->{status} eq 'INTAKE';
+        my $crit = jread(goal_file('criteria.json'));
+        die "dt: a goal needs at least one done-criterion before it can be confirmed\n" unless @{ $crit->{criteria} };
+        my $cfg = config_read();
+        my $lane = $o->{lane} // die "dt goal confirm --lane tiny|standard|large --lifecycle NAME [--grants a,b]\n";
+        my $lc = $o->{lifecycle} // die "dt goal confirm: --lifecycle required\n";
+        die "dt: unknown lane '$lane'\n" unless $cfg->{lanes}{$lane};
+        die "dt: unknown lifecycle '$lc' (have: " . join(', ', lifecycle_names()) . ")\n" unless grep { $_ eq $lc } lifecycle_names();
+        $s->{lane} = $lane;
+        $s->{lifecycle} = $lc;
+        $s->{spawn_cap} = $cfg->{lanes}{$lane}{spawn_cap};
+        $s->{turn_cap} = $cfg->{lanes}{$lane}{turn_cap};
+        $s->{git_grants} = { map { $_ => true } grep {length} split /,/, ($o->{grants} // '') };
+        $s->{status} = 'ACTIVE';
+        state_write($s);
+        ledger_add({ event => 'goal_confirm', goal => $s->{goal}, lane => $lane, lifecycle => $lc, grants => [ sort keys %{ $s->{git_grants} } ] });
+        return print "$s->{goal} confirmed: lane=$lane lifecycle=$lc grants=" . join(',', sort keys %{ $s->{git_grants} }) . "\n";
+    }
+    die "dt goal: new <title> | confirm --lane L --lifecycle N [--grants a,b]\n";
+}
+
+sub c_criteria {
+    my ($sub, @a) = @_;
+    need_init();
+    my $f = goal_file('criteria.json');
+    my $c = jread($f);
+    my ($o, $p) = opts(@a);
+    if ($sub eq 'add') {
+        my $type = $o->{type} // 'cmd';
+        die "dt criteria add --id C1 --text \"WHEN ... THEN ...\" [--type cmd|manual|judgement] [--check CMD]\n" unless $o->{id} && $o->{text};
+        die "dt: type must be cmd, manual or judgement\n" unless $type =~ /^(?:cmd|manual|judgement)$/;
+        die "dt: a cmd criterion needs --check\n" if $type eq 'cmd' && !$o->{check};
+        die "dt: duplicate id $o->{id}\n" if grep { $_->{id} eq $o->{id} } @{ $c->{criteria} };
+        push @{ $c->{criteria} }, { id => $o->{id}, text => $o->{text}, type => $type, check => $o->{check} // '', passes => false, evidence => undef };
+        jwrite($f, $c);
+        seal();
+        return print "criterion $o->{id} added\n";
+    }
+    if ($sub eq 'lock') {
+        for my $file (@$p) {
+            die "dt: no such file $file\n" unless -f root() . "/$file";
+            $c->{locks}{$file} = sha_file(root() . "/$file");
+        }
+        jwrite($f, $c);
+        seal();
+        return print "locked: " . join(', ', @$p) . "\n";
+    }
+    if ($sub eq 'confirm') {
+        my ($id) = @$p;
+        my ($cr) = grep { $_->{id} eq ($id // '') } @{ $c->{criteria} };
+        die "dt: unknown criterion '" . ($id // '') . "'\n" unless $cr;
+        die "dt: only manual or judgement criteria can be confirmed by hand\n" if $cr->{type} eq 'cmd';
+        die "dt criteria confirm Cn --by user|verifier [--note TEXT]\n" unless ($o->{by} // '') =~ /^(?:user|verifier)$/;
+        @$cr{qw(passes evidence)} = (true, { by => $o->{by}, note => $o->{note} // '', ts => ts() });
+        jwrite($f, $c);
+        seal();
+        return print "$id confirmed by $o->{by}\n";
+    }
+    if (($sub // 'show') eq 'show') {
+        printf "%-4s %-9s %-5s %s\n", $_->{id}, $_->{type}, ($_->{passes} ? 'PASS' : 'open'), $_->{text} for @{ $c->{criteria} };
+        print "locked: $_\n" for sort keys %{ $c->{locks} };
+        return;
+    }
+    die "dt criteria: add|lock|confirm|show\n";
+}
+
+sub verify_all {
+    my ($quiet) = @_;
+    my $f = goal_file('criteria.json');
+    my $c = jread($f);
+    my $root = root();
+    my $key = tree_key($root);
+    my $to = config_read()->{gates}{timeout} || 300;
+    my (@viol, @pending, $pass);
+    for my $file (sort keys %{ $c->{locks} }) { push @viol, $file if sha_file("$root/$file") ne $c->{locks}{$file} }
+    for my $cr (@{ $c->{criteria} }) {
+        if ($cr->{type} eq 'cmd') {
+            my $ev = goal_file("evidence/crit-$cr->{id}-$key.json");
+            my $r = jread($ev);
+            if (!$r) {
+                my ($ex, $tail) = run_cmd($cr->{check}, $root, $to);
+                $r = { exit => $ex, tail => $tail, key => $key, ts => ts() };
+                jwrite($ev, $r) if $ex == 0;
+            }
+            $cr->{passes} = $r->{exit} == 0 ? true : false;
+            $cr->{evidence} = { exit => $r->{exit}, tree => $key, ts => $r->{ts} };
+            print "FAIL $cr->{id}: $cr->{text}\n" . ($r->{tail} // '') . "\n" if $r->{exit} != 0 && !$quiet;
+        }
+        elsif (!$cr->{passes}) { push @pending, $cr->{id} }
+        $pass++ if $cr->{passes};
+    }
+    jwrite($f, $c);
+    seal();
+    my $total = @{ $c->{criteria} };
+    print "verify: $pass/$total pass" . (@pending ? "; awaiting confirmation: @pending" : '') . (@viol ? "; LOCK_VIOLATION: @viol" : '') . "\n" unless $quiet;
+    return (!@viol && !@pending && $pass == $total) ? 1 : 0;
+}
+sub c_verify { need_init(); $EXIT = verify_all() ? 0 : 1; return }
+
+sub c_gate {
+    my ($sub, @a) = @_;
+    need_init();
+    die "dt gate run [--full] [--cwd DIR]\n" unless ($sub // '') eq 'run';
+    my ($o) = opts(@a);
+    my ($ok, $msg) = run_gates($o->{cwd} // root(), $o->{full});
+    print "$msg\n";
+    $EXIT = 1 unless $ok;
+    return;
+}
+
+sub c_close {
+    need_init();
+    my $s = state_read();
+    die "dt: close needs status VERIFYING (is $s->{status}); finish the work first\n" unless $s->{status} eq 'VERIFYING';
+    my @why;
+    my $tamper = check_seal();
+    push @why, "protected files changed outside dt: @$tamper (review, then 'dt resync')" if @$tamper;
+    push @why, 'done-criteria not all verified (run: dt verify)' unless verify_all(1);
+    my ($ok, $msg) = run_gates(root(), 1);
+    push @why, $msg unless $ok;
+    if (length $s->{original_branch}) {
+        my $now = git_out(root(), 'rev-parse', $s->{original_branch});
+        push @why, "your branch '$s->{original_branch}' moved since the goal started" if $now ne $s->{original_sha};
+    }
+    if (@why) { print "CLOSE REFUSED:\n- " . join("\n- ", @why) . "\n"; $EXIT = 1; return }
+    my $c = jread(goal_file('criteria.json'));
+    spit(goal_file('closure.md'), "# $s->{goal} closed " . ts() . "\nlane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\ngates: $msg\n\n" .
+        join('', map { "- $_->{id} PASS: $_->{text}\n" } @{ $c->{criteria} }));
+    update_state(sub { $_[0]{status} = 'ACHIEVED' });
+    ledger_add({ event => 'goal_achieved', goal => $s->{goal}, spawns => $s->{spawns} });
+    update_state(sub { $_[0]{status} = 'IDLE' });
+    print "$s->{goal} ACHIEVED -> IDLE. Closure report: " . goal_file('closure.md') . "\n";
+}
+
+sub c_lifecycle {
+    my ($sub, @a) = @_;
+    $sub //= 'list';
+    if ($sub eq 'list') { print "$_\n" for lifecycle_names(); return }
+    if ($sub eq 'set') {
+        need_init();
+        die "dt: unknown lifecycle '" . ($a[0] // '') . "'\n" unless grep { $_ eq ($a[0] // '') } lifecycle_names();
+        my $s = state_read();
+        $s->{lifecycle} = $a[0];
+        state_write($s);
+        return print "lifecycle = $a[0]\n";
+    }
+    if ($sub eq 'suggest') {
+        my ($o) = opts(@a);
+        my %sig = (map { $_ => $o->{$_} // '*' } qw(requirements risk delivery ops size));
+        my @col = qw(requirements risk delivery ops size);
+        my (@hit, @fit);
+        my %have = map { $_ => 1 } lifecycle_names();
+        open my $h, '<', "$PLUGIN/lifecycles/_select.tsv" or die "dt: lifecycles/_select.tsv missing\n";
+        while (<$h>) {
+            chomp;
+            next if /^#/ || !/\S/;
+            my ($id, @f) = split /\t/;
+            my $why = pop @f;
+            my $m = 1;
+            for my $i (0 .. $#col) { $m &&= ($f[$i] eq '*' || $sig{ $col[$i] } eq '*' || grep { $_ eq $sig{ $col[$i] } } split /\|/, $f[$i]) }
+            push @fit, [ $id, $why ] if $m && !grep { $_->[0] eq $id } @fit;
+        }
+        close $h;
+        @hit = grep { $have{$_->[0]} } @fit;
+        print "note: $fit[0][0] fits best but is not installed in this release\n" if @fit && !$have{$fit[0][0]};
+        @hit or push @hit, [ 'agile-kanban', 'default: minimal-ceremony continuous flow' ];
+        print "recommended: $hit[0][0] | $hit[0][1]\n";
+        print "runner-up: $hit[1][0] | $hit[1][1]\n" if $hit[1];
+        print "all: " . join(', ', lifecycle_names()) . "\n";
+        return;
+    }
+    die "dt lifecycle: list|set NAME|suggest --requirements stable|evolving|unclear --risk regulated|high|normal --delivery project|product|maintenance --ops yes|no --size tiny|standard|large\n";
+}
+
+sub c_models {
+    my ($sub, @a) = @_;
+    need_init();
+    my $cfg = config_read();
+    my $def = default_config()->{models};
+    $sub //= 'show';
+    my $row = sub { my ($m) = @_; my $x = $cfg->{models}{$m}; my $d = $def->{$m} // {}; ($x->{model}, $x->{effort}, ($x->{model} eq ($d->{model} // '') && $x->{effort} eq ($d->{effort} // '')) ? 'recommended' : 'custom') };
+    if ($sub eq 'show') {
+        printf "%-20s %-8s %-7s %s\n", $_, $row->($_) for sort keys %{ $cfg->{models} };
+        return print "escalation: $cfg->{escalation}   chosen: " . ($cfg->{models_chosen} ? 'yes' : 'no (ask once)') . "\n";
+    }
+    if ($sub eq 'get') {
+        die "dt models get <member>\n" unless $cfg->{models}{ $a[0] // '' };
+        my ($mo, $ef, $st) = $row->($a[0]);
+        return print "model=$mo effort=$ef changed=" . ($st eq 'custom' ? 'yes' : 'no') . "\n";
+    }
+    if ($sub eq 'set') {
+        my ($o, $p) = opts(@a);
+        my @members = map { split /,/ } @$p;
+        die "dt models set <member[,member]> [--model " . join('|', @MODELS, 'recommended') . "] [--effort " . join('|', @EFFORTS, 'recommended') . "]\n" unless @members;
+        for my $m (@members) {
+            die "dt: unknown member '$m'\n" unless $cfg->{models}{$m};
+            if (defined $o->{model}) {
+                die "dt: model must be @MODELS or recommended\n" unless grep { $_ eq $o->{model} } @MODELS, 'recommended';
+                $cfg->{models}{$m}{model} = $o->{model} eq 'recommended' ? $def->{$m}{model} : $o->{model};
+            }
+            if (defined $o->{effort}) {
+                die "dt: effort must be @EFFORTS or recommended\n" unless grep { $_ eq $o->{effort} } @EFFORTS, 'recommended';
+                $cfg->{models}{$m}{effort} = $o->{effort} eq 'recommended' ? $def->{$m}{effort} : $o->{effort};
+            }
+        }
+        $cfg->{models_chosen} = true;
+        config_write($cfg);
+        return print "updated: @members\n";
+    }
+    if ($sub eq 'reset') { $cfg->{models} = $def; $cfg->{models_chosen} = true; config_write($cfg); return print "models reset to recommended\n" }
+    if ($sub eq 'choose') { $cfg->{models_chosen} = true; config_write($cfg); return print "recommended models accepted\n" }
+    die "dt models: show|get M|set M --model X --effort Y|reset|choose\n";
+}
+
+sub c_grant {
+    my ($sub, @a) = @_;
+    need_init();
+    my $s = state_read();
+    $sub //= 'show';
+    if ($sub eq 'set') { $s->{git_grants}{$_} = true for @a; state_write($s) }
+    elsif ($sub eq 'revoke') { delete $s->{git_grants}{$_} for @a; state_write($s) }
+    elsif ($sub ne 'show') { die "dt grant: show|set NAME...|revoke NAME...  (integration task_branches merges restore)\n" }
+    print "grants: " . (join(', ', sort keys %{ $s->{git_grants} }) || 'none') . "\n";
+}
+
+sub c_branch {
+    my ($sub) = @_;
+    need_init();
+    my $s = state_read();
+    my $root = root();
+    if (($sub // '') eq 'start') {
+        die "dt: no 'integration' git grant for this goal\n" unless $s->{git_grants}{integration};
+        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') ne '';
+        $s->{original_branch} = git_out($root, 'rev-parse', '--abbrev-ref', 'HEAD');
+        $s->{original_sha} = git_out($root, 'rev-parse', 'HEAD');
+        my $b = "devteam/$s->{goal}";
+        system('git', '-C', $root, 'switch', '-q', '-c', $b) == 0 or die "dt: could not create branch $b\n";
+        $s->{integration_branch} = $b;
+        state_write($s);
+        return print "on $b (your branch '$s->{original_branch}' at " . substr($s->{original_sha}, 0, 8) . ")\n";
+    }
+    if (($sub // '') eq 'finish') {
+        die "dt: no 'restore' git grant for this goal\n" unless $s->{git_grants}{restore};
+        die "dt: no branch was started\n" unless length $s->{original_branch};
+        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') ne '';
+        system('git', '-C', $root, 'switch', '-q', $s->{original_branch}) == 0 or die "dt: could not switch back\n";
+        my $now = git_out($root, 'rev-parse', $s->{original_branch});
+        die "dt: WARNING your branch moved ($s->{original_sha} -> $now)\n" if $now ne $s->{original_sha};
+        my $n = git_out($root, 'rev-list', '--count', "$s->{original_branch}..$s->{integration_branch}");
+        return print "back on '$s->{original_branch}'; $s->{integration_branch} holds $n commit(s) ready for your review\n";
+    }
+    die "dt branch: start|finish\n";
+}
+
+sub allow_ready {
+    my $g = config_read()->{gates};
+    my %allow;
+    for my $f ('settings.json', 'settings.local.json') {
+        my $j = eval { jread(root() . "/.claude/$f") } or next;
+        $allow{$_} = 1 for @{ $j->{permissions}{allow} // [] };
+    }
+    my @need = grep { length } map { (split ' ', $g->{$_} // '')[0] } qw(format typecheck test test_affected install);
+    return 'n/a (no gate commands configured)' unless @need;
+    my @miss = grep { my $w = $_; !grep { /^Bash\(\Q$w\E/ } keys %allow } @need;
+    return @miss ? 'no (not allow-listed: ' . join(', ', @miss) . ')' : 'yes';
+}
+sub c_status {
+    need_init();
+    my $s = state_read();
+    my $cfg = config_read();
+    printf "status: %s%s\n", $s->{status}, length $s->{blocked_reason} ? " ($s->{blocked_reason})" : '';
+    print "engaged: " . ($s->{engaged} ? "yes (session $s->{owner_session})" : 'no') . "\n";
+    if (length $s->{goal}) {
+        print "goal: $s->{goal}  lane: " . ($s->{lane} || '-') . "  lifecycle: " . ($s->{lifecycle} || '-') . "\n";
+        print "agents spawned: $s->{spawns}/$s->{spawn_cap}   main-thread turns: $s->{main_turns}" . ($s->{turn_cap} ? "/$s->{turn_cap}" : '') . "\n";
+        my $c = jread(goal_file('criteria.json'));
+        printf "criteria: %d/%d pass\n", scalar(grep { $_->{passes} } @{ $c->{criteria} }), scalar @{ $c->{criteria} };
+    }
+    print "git grants: " . (join(', ', sort keys %{ $s->{git_grants} }) || 'none') . "\n";
+    print "queued goals: " . scalar(@{ $s->{queue} }) . "\n";
+    print "models chosen: " . ($cfg->{models_chosen} ? 'yes' : 'no') . "\n";
+    print "unattended-ready: " . allow_ready() . "\n";
+    my $t = check_seal();
+    print "TAMPER: protected files changed outside dt: @$t\n" if @$t;
+}
+
+sub c_resync { need_init(); seal(); print "protected files re-sealed (you accepted the current contents)\n" }
+
+sub c_ledger {
+    my ($sub) = @_;
+    need_init();
+    open my $h, '<', ddir() . '/log.jsonl' or return print "ledger: empty\n";
+    my (%ev, %tok);
+    while (<$h>) {
+        my $r = eval { decode_json($_) } or next;
+        $ev{ $r->{event} . ($r->{agent_type} ? " $r->{agent_type}" : '') }++;
+        for my $m (keys %{ $r->{tokens} // {} }) { $tok{$m}{$_} += $r->{tokens}{$m}{$_} for keys %{ $r->{tokens}{$m} } }
+    }
+    print "events:\n", map { "  $_: $ev{$_}\n" } sort keys %ev;
+    my $pr = config_read()->{prices};
+    print "tokens by model (relative cost = (in+out) x price):\n";
+    for my $m (sort keys %tok) {
+        my ($i, $o, $cr) = map { $tok{$m}{$_} // 0 } qw(input output cache_read);
+        my ($fam) = grep { $m =~ /$_/ } keys %$pr;
+        printf "  %s: in=%d out=%d cache_read=%d cost=%.0f\n", $m, $i, $o, $cr, ($i + $o) * ($pr->{ $fam // '' } // 1);
+    }
+}

@@ -1,0 +1,11 @@
+# profile	requirements	risk	delivery	ops	size	reason   (tab-separated; * = any; a|b = either; first match wins, second distinct match is the runner-up)
+direct	*	*	*	*	tiny	a tiny change needs no process overhead
+v-model	*	regulated	*	*	*	regulated or audit-trailed work needs a test plan written for each phase
+waterfall	stable	normal|high	project	no	standard|large	a fixed, well-understood scope is cheapest with upfront design
+devops	*	*	*	yes	*	infra, pipeline or deployment is central to the goal
+spiral	unclear|evolving	high	*	*	*	high uncertainty plus high risk is best handled by risk-driven loops
+prototype	unclear	normal	*	*	standard|large	unclear UX or requirements need fast feedback before building properly
+agile-kanban	*	*	maintenance	*	*	steady maintenance or bug flow suits continuous pull
+agile-scrum	evolving|unclear	*	product|project	*	large	evolving requirements in a large product benefit from verified iterations
+agile-kanban	*	*	*	*	standard	a standard-size change flows best with minimal ceremony
+agile-scrum	*	*	*	*	large	large work benefits from iterations that each end in a verified increment
