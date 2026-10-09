@@ -8,10 +8,12 @@ our $REPO;
 
 new_repo();
 dt('init');
+my ($rc, $out) = dt('status');
+like($out, qr/setup: incomplete \(models not chosen; no project profile; no standards\)/, 'a fresh project reports everything setup still needs');
 dt('engage', 's1');
 dt('goal', 'new', 'tiny fix');
 dt('criteria', 'add', '--id', 'C1', '--text', 'WHEN x THEN y', '--check', 'true');
-my ($rc, $out) = dt('goal', 'confirm', '--lane', 'tiny', '--lifecycle', 'direct');
+($rc, $out) = dt('goal', 'confirm', '--lane', 'tiny', '--lifecycle', 'direct');
 is($rc, 0, 'tiny goal confirmed');
 is(state()->{spawn_cap}, 0, 'tiny lane has a spawn cap of zero');
 

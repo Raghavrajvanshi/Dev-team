@@ -488,6 +488,8 @@ sub c_status {
     print "git grants: " . (join(', ', sort keys %{ $s->{git_grants} }) || 'none') . "\n";
     print "queued goals: " . scalar(@{ $s->{queue} }) . "\n";
     print "models chosen: " . ($cfg->{models_chosen} ? 'yes' : 'no') . "\n";
+    my @miss = ($cfg->{models_chosen} ? () : 'models not chosen', -f ddir() . '/profile.md' ? () : 'no project profile', -f ddir() . '/standards.md' ? () : 'no standards');
+    print "setup: " . (@miss ? "incomplete (" . join('; ', @miss) . ")" : 'complete') . "\n";
     print "unattended-ready: " . allow_ready() . "\n";
     my $t = check_seal();
     print "TAMPER: protected files changed outside dt: @$t\n" if @$t;

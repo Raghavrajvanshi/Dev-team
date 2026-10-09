@@ -8,7 +8,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (191) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (194) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.1  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.2  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -68,7 +68,7 @@ Open Claude Code in your project and follow these steps.
 It checks your setup (Claude Code version, git repo with a commit, clean working tree) and offers a fix for anything missing, never applying it without your yes. The first time, it asks **one question: use the recommended models, or customise?** (recommended is pre-selected). It then scans the project cheaply into `.devteam/profile.md`, records the project's test and lint commands, and offers an allow-list so the team does not stop at every command. You approve each of these.
 
 **2. Describe a goal in plain words**
-For example: *"Add a /health endpoint that returns {status: ok}, with a test."* (or `/devteam:goal <text>`). The Goal Keeper asks only what it cannot infer (the Architect adds up to three technical questions), each with a recommended answer, so "go with your recommendations" works. Then you get **one combined confirmation**:
+For example: *"Add a /health endpoint that returns {status: ok}, with a test."* (or `/devteam:goal <text>`). If you skipped the one-time setup (model choice, project scan), the goal flow finishes it first instead of failing. The Goal Keeper asks only what it cannot infer (the Architect adds up to three technical questions), each with a recommended answer, so "go with your recommendations" works. Then you get **one combined confirmation**:
 
 | You confirm | Examples |
 |---|---|
@@ -123,7 +123,7 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 
 **Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
 
-**Confirmed in a first live run:** the plugin loads from the marketplace, `/devteam:start` runs, preflight, `dt init` and `dt engage ${CLAUDE_SESSION_ID}` work, and `dt` resolves. That run also found and fixed three bugs: `changemodels` was user-only so `start` could not use it, `.gitignore` edits left the tree dirty (now `.git/info/exclude`), and the first commit could sweep in `.DS_Store` and `.claude/` (now it shows the file list and asks).
+**Confirmed in a first live run:** the plugin loads from the marketplace, `/devteam:start` runs, preflight, `dt init` and `dt engage ${CLAUDE_SESSION_ID}` work, and `dt` resolves. Live runs also found and fixed four bugs: `changemodels` was user-only so `start` could not use it, `.gitignore` edits left the tree dirty (now `.git/info/exclude`), the first commit could sweep in `.DS_Store` and `.claude/` (now it shows the file list and asks), and `/devteam:goal` ran before setup was finished (it now completes setup first via the `setup` skill).
 
 **Not yet verified inside a live session** (each has a documented fallback; please report what you see): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, preloading the `craft` skill into agents by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`).
 
@@ -132,7 +132,7 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 ## Develop
 
 ```bash
-prove tests/                                        # 191 tests
+prove tests/                                        # 194 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

@@ -7,9 +7,9 @@ argument-hint: <what you want built or changed>
 
 Nothing is built until the user confirms a goal here. Intake runs in the main thread; no agent is spawned. Input: `$ARGUMENTS`, or the user's last message.
 
-**0. Check.** `dt status`. If devteam is not engaged, tell the user to run `/devteam:start`. If a goal is already running, this is not a new goal: use the `amend` skill if it changes the current goal, `dt queue add "<text>"` if it is unrelated (tell the user it is queued; one goal at a time), or just answer if it is a question. Continue only from IDLE.
+**0. Check.** `dt status`. If devteam is not engaged, tell the user to run `/devteam:start`. If a goal is already running, this is not a new goal: use the `amend` skill if it changes the current goal, `dt queue add "<text>"` if it is unrelated (tell the user it is queued; one goal at a time), or just answer if it is a question. Continue only from IDLE. If `dt status` ends with `setup: incomplete`, invoke the `setup` skill first (it asks the one-time model question and scans the project, skipping what is done), then continue.
 
-**1. Understand cheaply.** Read `.devteam/profile.md` and `.devteam/standards.md` only. If `standards.md`'s `source-hash` no longer matches `shasum -a 256 CLAUDE.md`, regenerate it (see `onboard`). Do not explore the codebase.
+**1. Understand cheaply.** With the Read tool (never a shell probe), read `.devteam/profile.md` and `.devteam/standards.md` only; they exist once setup is complete. If `standards.md`'s `source-hash` no longer matches `shasum -a 256 CLAUDE.md`, regenerate it (see `onboard`). Do not explore the codebase.
 
 **2. Size it.** Propose a lane: *tiny* (one file or a small, clear fix, no design), *standard* (a feature in code that exists), *large* (several modules or a new system). When unsure, choose the smaller.
 

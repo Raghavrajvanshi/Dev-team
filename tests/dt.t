@@ -174,6 +174,14 @@ like($out, qr/1\. fix the footer\n2\. second/, 'queue lists in order');
 ($rc, $out) = dt('queue', 'pop');
 is($out, "fix the footer\n", 'pop returns the first');
 
+# --- setup completeness shows up in status ---
+($rc, $out) = dt('status');
+like($out, qr/setup: incomplete \(no project profile; no standards\)/, 'status names the missing profile and standards');
+dt('models', 'choose');
+sh('printf "# profile\\n" > .devteam/profile.md && printf "source-hash: none\\n" > .devteam/standards.md');
+($rc, $out) = dt('status');
+like($out, qr/setup: complete/, 'and reports complete once models are chosen and profile and standards exist');
+
 # --- local ignore: the tree stays clean and the tracked .gitignore is never touched ---
 ($rc, $out) = dt('gitignore');
 is($rc, 0, 'gitignore runs');
