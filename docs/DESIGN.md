@@ -12,6 +12,7 @@ A goal-gated, token-lean, slop-free software team as a Claude Code plugin.
 - **Engagement** persists through IDLE (so the next message starts a new goal) and ends with `/devteam:stop`.
 - **Engineers** run one at a time and commit on the integration branch; worktrees and parallelism are v0.2.
 - **Ignoring local state:** `dt gitignore` writes `.git/info/exclude` (not the tracked `.gitignore`) for `.devteam/`, `.claude/worktrees/` and `.claude/settings.local.json`, and the clean-tree checks ignore those paths, so the team's own files never dirty the tree.
+- **Personas:** every role has a fixed fictional name and title in `plugins/devteam/team.tsv` (read by `dt team` and `dt who`). Role ids stay the technical key for hooks, config and spawning; the names are the human-facing layer in agent descriptions and prompts, PM announcements, the board's owner column and `dt models show`. A test keeps the roster, agent files and skills in sync.
 - **Setup is a shared skill:** the one-time model choice and project scan live in the `setup` skill. `start` invokes it, and `goal` invokes it first if `dt status` reports `setup: incomplete`, so skipping `/devteam:start` cannot leave intake without a profile.
 - **Initial commit:** `start` shows the file list and proposes exclusions (`.DS_Store`, `.env*`, `node_modules/`, `.claude/`) instead of committing everything.
 - **`changemodels` is model-invocable** (it only changes anything after an explicit confirmation), because `start` and `amend` hand off to it. `start`, `stop`, `pause` and `ask` stay user-only.

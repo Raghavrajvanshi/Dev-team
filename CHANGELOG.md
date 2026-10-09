@@ -2,6 +2,16 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.1.4] - 2026-10-10
+### Added
+- Team personas: every role is a fixed fictional person with a name and title (Priya Raman, Software Architect; Marcus Lindqvist, Full-Stack Engineer; Aisha Rahman, QA Engineer; Tomas Herrera, Staff Engineer; Elena Petrova, Acceptance Verifier; Daniel Reyes, PM; Maya Okafor, Product Owner), kept in `plugins/devteam/team.tsv`.
+- `dt team [--all]` and `dt who <role|name> [--role]`; `dt models show` lists the person, and `dt models set`/`get` accept first names.
+- The PM announces who is working and uses names in the board; `/devteam:ask` and `/devteam:changemodels` accept names; `/devteam:start` shows the team.
+### Changed
+- Agent descriptions and prompts introduce the person (descriptions stay within 15 words). Role ids are unchanged.
+### Fixed
+- `dt` no longer clobbers the global `$_` when reading data files.
+
 ## [0.1.3] - 2026-10-10
 ### Added
 - `CHANGELOG.md` and `scripts/release`: every published change now bumps the version and gets a GitHub release whose notes come from this file, with the commit, test count and validation result attached.

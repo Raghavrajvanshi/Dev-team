@@ -8,7 +8,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (194) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (225) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.3  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.4  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -95,6 +95,22 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 | `/devteam:lifecycle [name]` | Show or change the process lifecycle |
 | `/devteam:ask <role> <question>` | One-off consult with a role (read-only) |
 
+### The team
+
+Each member is a fictional person with a fixed name and title, so you can talk to them naturally (`/devteam:ask priya ...`, `/devteam:changemodels` accepts first names). The technical role ids (`devteam:architect`, ...) are unchanged. Run `dt team` (or `/devteam:start`, which shows it) for the live list.
+
+| Person | Title | Role id | Runs as |
+|---|---|---|---|
+| Maya Okafor | Product Owner (Goal Keeper) | `goal-keeper` | intake, in your session |
+| Daniel Reyes | Project Manager and Scrum Master | `project-manager` | the PM, in your session |
+| Priya Raman | Software Architect | `architect` | agent |
+| Marcus Lindqvist | Full-Stack Engineer | `fullstack-engineer` | agent |
+| Aisha Rahman | QA Engineer | `qa-engineer` | agent |
+| Tomas Herrera | Staff Engineer (code review) | `reviewer` | agent |
+| Elena Petrova | Acceptance Verifier | `goal-verifier` | agent |
+
+Planned: Wei Chen (Backend), Sofia Marini (Frontend), Kenji Watanabe (Mobile), Hannah Becker (DevOps), Idris Bello (Security), Lucia Fernandes (UX), Oliver Grant (Technical Writer), Nadia Haddad (Research). Names are invented; any resemblance to real people is coincidental.
+
 ### Lanes and lifecycles
 
 - **Lane** is how big the work is: *tiny* (one file or a small fix, **zero agents**), *standard* (a feature in existing code), *large* (several modules). Each lane caps how many agents may start.
@@ -132,7 +148,7 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 ## Develop
 
 ```bash
-prove tests/                                        # 194 tests
+prove tests/                                        # 225 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

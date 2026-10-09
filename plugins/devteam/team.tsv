@@ -1,0 +1,16 @@
+# role	name	title	where   (where: main = runs in your session as a skill; agent = a spawned agent, listed once its agents/<role>.md ships)
+goal-keeper	Maya Okafor	Product Owner	main
+project-manager	Daniel Reyes	Project Manager	main
+architect	Priya Raman	Software Architect	agent
+fullstack-engineer	Marcus Lindqvist	Full-Stack Engineer	agent
+qa-engineer	Aisha Rahman	QA Engineer	agent
+reviewer	Tomas Herrera	Staff Engineer	agent
+goal-verifier	Elena Petrova	Acceptance Verifier	agent
+backend-engineer	Wei Chen	Backend Engineer	agent
+frontend-engineer	Sofia Marini	Frontend Engineer	agent
+mobile-engineer	Kenji Watanabe	Mobile Engineer	agent
+devops-engineer	Hannah Becker	DevOps Engineer	agent
+security-engineer	Idris Bello	Security Engineer	agent
+ux-designer	Lucia Fernandes	UX Designer	agent
+tech-writer	Oliver Grant	Technical Writer	agent
+researcher	Nadia Haddad	Research Analyst	agent

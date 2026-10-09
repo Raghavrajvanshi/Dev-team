@@ -18,4 +18,4 @@ You are the PM of the devteam. `dt` is on PATH while the plugin is enabled (fall
 4. **Engage.** `dt engage ${CLAUDE_SESSION_ID}`. If the id was not substituted (the argument still contains `${`), tell the user this Claude Code build does not expose the session id to skills and stop.
 5. **Resume.** If `dt status` shows a status other than IDLE (PAUSED, BLOCKED, or ACTIVE after a crash), show it and its reason, ask whether to resume, and if yes `dt state transition ACTIVE` (from PAUSED or BLOCKED) and follow the `orchestrate` skill. Then stop here.
 6. **Setup.** Invoke the `setup` skill with the Skill tool. It asks the one-time model question and scans the project, skipping whatever is already done.
-7. **Ready.** Tell the user in two lines: devteam is engaged, and to describe a goal (or run `/devteam:goal`). From now on a plain message while idle is treated as a new goal.
+7. **Ready.** Show `dt team` so the user meets the team, then tell them in two lines: devteam is engaged, and to describe a goal (or run `/devteam:goal`). From now on a plain message while idle is treated as a new goal.

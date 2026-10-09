@@ -27,6 +27,7 @@ my %CMD = (
     verify => \&c_verify, gate => \&c_gate, close => \&c_close, lifecycle => \&c_lifecycle,
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
+    team => \&c_team, who => \&c_who,
 );
 
 my $cmd = shift @ARGV // '';
@@ -54,6 +55,38 @@ sub lifecycle_names {
     my %n;
     for my $d (lifecycle_dirs()) { for my $f (glob "$d/*.md") { (my $b = $f) =~ s{.*/|\.md$}{}g; $n{$b} = 1 unless $b =~ /^_/ } }
     return sort keys %n;
+}
+
+# The people behind the role ids: fixed fictional names and titles from team.tsv. Role ids stay the technical key.
+sub team_rows {
+    my ($all) = @_;
+    open my $h, '<', "$PLUGIN/team.tsv" or die "dt: team.tsv missing\n";
+    my @r;
+    while (my $line = <$h>) {
+        chomp $line;
+        next if $line =~ /^#/ || $line !~ /\S/;
+        my ($role, $name, $title, $where) = split /\t/, $line;
+        push @r, { role => $role, name => $name, title => $title, shipped => ($where eq 'main' || -f "$PLUGIN/agents/$role.md") ? 1 : 0 };
+    }
+    return grep { $all || $_->{shipped} } @r;
+}
+sub find_person {
+    my ($q) = @_;
+    $q = lc($q // '');
+    my @hit = grep { $q eq lc $_->{role} || $q eq lc $_->{name} || $q eq lc((split ' ', $_->{name})[0]) } team_rows(1);
+    return @hit == 1 ? $hit[0] : undef;
+}
+sub member_role { my $p = find_person($_[0]); $p ? $p->{role} : $_[0] }
+sub person_name { my $p = find_person($_[0]); $p ? $p->{name} : '' }
+
+sub c_team {
+    my ($o) = opts(@_);
+    printf "%-18s %-24s %s\n", $_->{name}, $_->{title}, $_->{role} . ($_->{shipped} ? '' : ' (planned)') for team_rows($o->{all});
+}
+sub c_who {
+    my ($o, $p) = opts(@_);
+    my $x = find_person($p->[0]) or die "dt: no team member '" . ($p->[0] // '') . "' (try: dt team --all)\n";
+    print $o->{role} ? "$x->{role}\n" : "$x->{name}, $x->{title}\n";
 }
 
 sub c_init {
@@ -360,10 +393,10 @@ sub c_lifecycle {
         my (@hit, @fit);
         my %have = map { $_ => 1 } lifecycle_names();
         open my $h, '<', "$PLUGIN/lifecycles/_select.tsv" or die "dt: lifecycles/_select.tsv missing\n";
-        while (<$h>) {
-            chomp;
-            next if /^#/ || !/\S/;
-            my ($id, @f) = split /\t/;
+        while (my $line = <$h>) {
+            chomp $line;
+            next if $line =~ /^#/ || $line !~ /\S/;
+            my ($id, @f) = split /\t/, $line;
             my $why = pop @f;
             my $m = 1;
             for my $i (0 .. $#col) { $m &&= ($f[$i] eq '*' || $sig{ $col[$i] } eq '*' || grep { $_ eq $sig{ $col[$i] } } split /\|/, $f[$i]) }
@@ -389,17 +422,18 @@ sub c_models {
     $sub //= 'show';
     my $row = sub { my ($m) = @_; my $x = $cfg->{models}{$m}; my $d = $def->{$m} // {}; ($x->{model}, $x->{effort}, ($x->{model} eq ($d->{model} // '') && $x->{effort} eq ($d->{effort} // '')) ? 'recommended' : 'custom') };
     if ($sub eq 'show') {
-        printf "%-20s %-8s %-7s %s\n", $_, $row->($_) for sort keys %{ $cfg->{models} };
+        printf "%-20s %-8s %-7s %-12s %s\n", $_, $row->($_), person_name($_) for sort keys %{ $cfg->{models} };
         return print "escalation: $cfg->{escalation}   chosen: " . ($cfg->{models_chosen} ? 'yes' : 'no (ask once)') . "\n";
     }
     if ($sub eq 'get') {
-        die "dt models get <member>\n" unless $cfg->{models}{ $a[0] // '' };
-        my ($mo, $ef, $st) = $row->($a[0]);
+        my $m = member_role($a[0]);
+        die "dt models get <member>\n" unless $cfg->{models}{ $m };
+        my ($mo, $ef, $st) = $row->($m);
         return print "model=$mo effort=$ef changed=" . ($st eq 'custom' ? 'yes' : 'no') . "\n";
     }
     if ($sub eq 'set') {
         my ($o, $p) = opts(@a);
-        my @members = map { split /,/ } @$p;
+        my @members = map { member_role($_) } map { split /,/ } @$p;
         die "dt models set <member[,member]> [--model " . join('|', @MODELS, 'recommended') . "] [--effort " . join('|', @EFFORTS, 'recommended') . "]\n" unless @members;
         for my $m (@members) {
             die "dt: unknown member '$m'\n" unless $cfg->{models}{$m};

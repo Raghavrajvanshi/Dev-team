@@ -1,6 +1,6 @@
 {
   "name": "devteam",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Goal-gated, token-lean software team of agents for any project. Nothing starts until you confirm a goal; the team stops when it is verifiably achieved.",
   "author": { "name": "Raghav Rajvanshi" },
   "license": "MIT",
