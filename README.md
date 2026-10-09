@@ -68,6 +68,10 @@ claude --plugin-dir ./plugins/devteam     # try it in a project
 
 Layout: `plugins/devteam/{bin/dt, lib/, hooks/, skills/, agents/, lifecycles/, templates/}`.
 
+## Design
+
+The full design and the reasoning behind it: [docs/DESIGN.md](docs/DESIGN.md).
+
 ## License
 
-Not yet chosen.
+[MIT](LICENSE)
