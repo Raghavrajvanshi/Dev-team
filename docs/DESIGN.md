@@ -21,10 +21,8 @@ The goal is a reusable dev team of agents (Architect, engineers, PM/Scrum Master
 3. **You are the highest authority.** You can change anything, any time.
 4. **Goal Keeper.** Asks you to define the goal first; no work until you confirm it; stops when the goal is achieved; the next prompt starts a new goal.
 5. **No slop.** Code is modular, crisp, clean, minimal. A core value of the Architect and every engineer.
-6. **Learn from comparable open-source projects.** The research results are summarised in section 10.
-7. **Technically correct.** Checked against the current Claude Code docs in two review rounds. Anything the docs don't settle goes to the spike (section 11), not into the design as fact.
-
-8. **All lifecycle types accommodated.** The PM suggests the best-fit process for your goal (Agile, DevOps, Waterfall, V-model, Spiral, Prototype, or your own) and asks you which one you want (section 3a).
+6. **Technically correct.** Checked against the current Claude Code docs in two review rounds. Anything the docs don't settle goes to the spike (section 11), not into the design as fact.
+7. **All lifecycle types accommodated.** The PM suggests the best-fit process for your goal (Agile, DevOps, Waterfall, V-model, Spiral, Prototype, or your own) and asks you which one you want (section 3a).
 
 Requires Claude Code 2.1.295 or newer (older versions lack `onFailure` for hooks). Agent teams mode is not used.
 
