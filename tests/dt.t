@@ -174,4 +174,16 @@ like($out, qr/1\. fix the footer\n2\. second/, 'queue lists in order');
 ($rc, $out) = dt('queue', 'pop');
 is($out, "fix the footer\n", 'pop returns the first');
 
+# --- local ignore: the tree stays clean and the tracked .gitignore is never touched ---
+($rc, $out) = dt('gitignore');
+is($rc, 0, 'gitignore runs');
+like(slurp_file("$REPO/.git/info/exclude"), qr{^\.devteam/$}m, 'entries go to .git/info/exclude');
+ok(!-e "$REPO/.gitignore", 'the tracked .gitignore is not created or changed');
+($rc, $out) = dt('gitignore');
+like($out, qr/already ignored/, 'gitignore is idempotent');
+sh('mkdir -p .claude && echo "{}" > .claude/settings.local.json && mkdir -p .devteam/x');
+($rc, $out) = dt('preflight');
+is($rc, 0, 'the allow-list file and .devteam do not make the tree dirty') or diag $out;
+sub slurp_file { open my $h, '<', $_[0] or return ''; local $/; <$h> }
+
 done_testing;

@@ -8,7 +8,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (186) and the plugin installs cleanly from this repo, but it has not yet been exercised end to end inside a live Claude Code session. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (191) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.0  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.1  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -102,7 +102,7 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 
 ### What it creates in your project
 
-- `.devteam/` (it offers to add this to `.gitignore`): state, config, `profile.md`, `standards.md`, and `goals/G-001/{goal.md, criteria.json, board.md, closure.md}`. Safe to read, and you may edit `goal.md` freely. Changes to `criteria.json`, `state.json` or `config.json` made outside the team's tools are detected and block the goal; ask Claude to run `dt resync` to accept a deliberate edit.
+- `.devteam/` (it offers to hide it from `git status` through `.git/info/exclude`; your tracked `.gitignore` is never touched): state, config, `profile.md`, `standards.md`, and `goals/G-001/{goal.md, criteria.json, board.md, closure.md}`. Safe to read, and you may edit `goal.md` freely. Changes to `criteria.json`, `state.json` or `config.json` made outside the team's tools are detected and block the goal; ask Claude to run `dt resync` to accept a deliberate edit.
 - A git branch `devteam/G-001`, only if you grant it. Your own branch is restored at the end and its tip is verified unchanged.
 
 ## Cost
@@ -116,7 +116,6 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 | Preflight says `FAIL claude-version` | `claude update`, then restart |
 | `FAIL git` or `FAIL clean-tree` | Make an initial commit; commit or stash your changes, then rerun `/devteam:start` |
 | `dt: command not found` | Restart Claude Code or `/reload-plugins`. If it persists, tell Claude to run `dt` by its full path inside the installed plugin folder (`claude plugin list` shows where), and report it |
-| Start says the session id was not substituted | This build does not expose it to skills; open an issue with your Claude Code version |
 | Goal is `BLOCKED` | `/devteam:status` shows why. Resolve it and run `/devteam:start` to resume, or `/devteam:stop` |
 | The team is in the way of normal work | `/devteam:stop`, or `claude plugin disable devteam@devteam-marketplace` |
 
@@ -124,14 +123,16 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 
 **Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
 
-**Not yet verified inside a live session** (each has a documented fallback; please report what you see): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, the plugin `bin/` directory joining PATH (so `dt` resolves), `${CLAUDE_SESSION_ID}` in skills, preloading the `craft` skill into agents by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`).
+**Confirmed in a first live run:** the plugin loads from the marketplace, `/devteam:start` runs, preflight, `dt init` and `dt engage ${CLAUDE_SESSION_ID}` work, and `dt` resolves. That run also found and fixed three bugs: `changemodels` was user-only so `start` could not use it, `.gitignore` edits left the tree dirty (now `.git/info/exclude`), and the first commit could sweep in `.DS_Store` and `.claude/` (now it shows the file list and asks).
+
+**Not yet verified inside a live session** (each has a documented fallback; please report what you see): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, preloading the `craft` skill into agents by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`).
 
 **v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Security/UX/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 186 tests
+prove tests/                                        # 191 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

@@ -11,7 +11,11 @@ A goal-gated, token-lean, slop-free software team as a Claude Code plugin.
 - **Seal:** `state.json`, `config.json` and the current goal's `criteria.json` are sealed; a mismatch during a goal sets BLOCKED, and `dt resync` accepts a deliberate hand edit.
 - **Engagement** persists through IDLE (so the next message starts a new goal) and ends with `/devteam:stop`.
 - **Engineers** run one at a time and commit on the integration branch; worktrees and parallelism are v0.2.
-- **Not yet verified inside a live session:** section 11 items (a)-(p), notably the `Agent` input fields, `agent_id` on subagent hooks, `${CLAUDE_SESSION_ID}` in skills, bare-name `skills:` preload, and the `model`/`effort` override on spawn.
+- **Ignoring local state:** `dt gitignore` writes `.git/info/exclude` (not the tracked `.gitignore`) for `.devteam/`, `.claude/worktrees/` and `.claude/settings.local.json`, and the clean-tree checks ignore those paths, so the team's own files never dirty the tree.
+- **Initial commit:** `start` shows the file list and proposes exclusions (`.DS_Store`, `.env*`, `node_modules/`, `.claude/`) instead of committing everything.
+- **`changemodels` is model-invocable** (it only changes anything after an explicit confirmation), because `start` and `amend` hand off to it. `start`, `stop`, `pause` and `ask` stay user-only.
+- **Confirmed live (first run):** the plugin loads, `/devteam:start` runs, preflight, init and engage work, `${CLAUDE_SESSION_ID}` is substituted, and `dt` resolves.
+- **Not yet verified inside a live session:** section 11 items (a)-(p) not listed above, notably the `Agent` input fields, `agent_id` on subagent hooks, bare-name `skills:` preload, and the `model`/`effort` override on spawn.
 
 ## Context
 The goal is a reusable dev team of agents (Architect, engineers, PM/Scrum Master, plus extras) packaged as a Claude Code plugin for any project. The rules it is built on:

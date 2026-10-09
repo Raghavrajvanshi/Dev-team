@@ -11,6 +11,7 @@ use DT qw(root ddir slurp spit jread jwrite ts true false default_state default_
   locked update_state run_gates);
 
 my $MIN_CLAUDE = '2.1.295';
+my @NOISE = (':!.devteam', ':!.claude/worktrees', ':!.claude/settings.local.json');   # never make the tree "dirty"
 my $PLUGIN = "$FindBin::Bin/..";
 my %NEXT = (
     IDLE => [qw(INTAKE ONBOARDING STOPPED)], ONBOARDING => [qw(IDLE STOPPED)],
@@ -65,12 +66,15 @@ sub c_init {
 }
 
 sub c_gitignore {
-    my $f = root() . '/.gitignore';
+    my $root = root();
+    my $f = git_out($root, 'rev-parse', '--git-path', 'info/exclude');
+    die "dt: not a git repository\n" unless length $f;
+    $f = "$root/$f" unless $f =~ m{^/};
     my $c = slurp($f) // '';
-    my @add = grep { $c !~ /^\Q$_\E\s*$/m } ('.devteam/', '.claude/worktrees/');
-    return print "gitignore: already ok\n" unless @add;
+    my @add = grep { $c !~ /^\Q$_\E\s*$/m } ('.devteam/', '.claude/worktrees/', '.claude/settings.local.json');
+    return print "already ignored locally (.git/info/exclude)\n" unless @add;
     spit($f, $c . ($c =~ /\n\z|^\z/ ? '' : "\n") . join('', map {"$_\n"} @add));
-    print "gitignore: added " . join(', ', @add) . "\n";
+    print "ignored locally via .git/info/exclude (your .gitignore is untouched): " . join(', ', @add) . "\n";
 }
 
 sub c_preflight {
@@ -81,7 +85,7 @@ sub c_preflight {
     $v ? ($add->(vcmp($v, $MIN_CLAUDE) >= 0 ? 'ok' : 'FAIL', 'claude-version', "$v (need >= $MIN_CLAUDE)")) : $add->('FAIL', 'claude-version', 'claude not found');
     my $head = git_out($root, 'rev-parse', '--verify', '-q', 'HEAD');
     $add->($head ? 'ok' : 'FAIL', 'git', $head ? 'repository with at least one commit' : 'not a git repository with a commit (offer: git init + initial commit)');
-    my $dirty = $head ? git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') : '';
+    my $dirty = $head ? git_out($root, 'status', '--porcelain', '--', '.', @NOISE) : '';
     $add->($dirty eq '' ? 'ok' : 'FAIL', 'clean-tree', $dirty eq '' ? 'working tree clean' : 'uncommitted changes: ' . (split /\n/, $dirty)[0] . ' ...');
     for my $f ("$PLUGIN/bin/dt", "$PLUGIN/hooks/hook.sh") {
         $add->(-x $f ? 'ok' : 'FAIL', 'executable', $f =~ s{.*/}{}r . (-x $f ? '' : ' missing or not executable'));
@@ -435,7 +439,7 @@ sub c_branch {
     my $root = root();
     if (($sub // '') eq 'start') {
         die "dt: no 'integration' git grant for this goal\n" unless $s->{git_grants}{integration};
-        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') ne '';
+        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', @NOISE) ne '';
         $s->{original_branch} = git_out($root, 'rev-parse', '--abbrev-ref', 'HEAD');
         $s->{original_sha} = git_out($root, 'rev-parse', 'HEAD');
         my $b = "devteam/$s->{goal}";
@@ -447,7 +451,7 @@ sub c_branch {
     if (($sub // '') eq 'finish') {
         die "dt: no 'restore' git grant for this goal\n" unless $s->{git_grants}{restore};
         die "dt: no branch was started\n" unless length $s->{original_branch};
-        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', ':!.devteam', ':!.claude/worktrees') ne '';
+        die "dt: working tree not clean\n" if git_out($root, 'status', '--porcelain', '--', '.', @NOISE) ne '';
         system('git', '-C', $root, 'switch', '-q', $s->{original_branch}) == 0 or die "dt: could not switch back\n";
         my $now = git_out($root, 'rev-parse', $s->{original_branch});
         die "dt: WARNING your branch moved ($s->{original_sha} -> $now)\n" if $now ne $s->{original_sha};

@@ -1,7 +1,6 @@
 ---
 name: changemodels
 description: Choose which team members to change and set their model and effort.
-disable-model-invocation: true
 ---
 # changemodels
 
