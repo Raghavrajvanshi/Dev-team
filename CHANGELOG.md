@@ -2,6 +2,11 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.1] - 2026-10-10
+### Added
+- Workflow diagrams in the README and `docs/images/`: the end-to-end flow with the three points where you decide, the goal state machine, the team and enforcement architecture, and the git permission tiers. SVG sources plus 2x PNG exports.
+- `docs/images/generate.py` and `scripts/diagrams` regenerate them, so they can follow the workflow as it changes.
+
 ## [0.2.0] - 2026-10-10
 Quality and currency. A first end-to-end project passed every check and still looked like a wireframe: all criteria were structural, nothing researched what current work looks like, nobody looked at the result, and the size budget acted as a ceiling.
 ### Added

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Regenerate the workflow diagrams: SVG from docs/images/generate.py, PNG exports through headless Chrome.
+set -eu
+cd "$(dirname "$0")/.."
+python3 docs/images/generate.py
+chrome=${DT_CHROME:-}
+if [ -z "$chrome" ]; then
+  for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" google-chrome chromium; do
+    if [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; then chrome=$c; break; fi
+  done
+fi
+[ -n "$chrome" ] || { echo "diagrams: no Chrome found (set DT_CHROME)" >&2; exit 1; }
+for svg in docs/images/*.svg; do
+  w=$(sed -n 's/.*<svg[^>]* width="\([0-9]*\)".*/\1/p' "$svg" | head -1)
+  h=$(sed -n 's/.*<svg[^>]* height="\([0-9]*\)".*/\1/p' "$svg" | head -1)
+  "$chrome" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
+    --window-size="$w,$h" --screenshot="${svg%.svg}.png" "file://$PWD/$svg" >/dev/null 2>&1
+  echo "${svg%.svg}.png"
+done

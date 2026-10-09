@@ -10,6 +10,23 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 
 > **Status: v0.1 (core loop).** Unit and CLI tests pass (280) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
+## How it works
+
+![How a goal flows through the team](docs/images/workflow.png)
+
+*A standard user-facing goal. You are asked at the three red markers; everything else runs on its own.*
+
+<table>
+<tr>
+<td width="50%"><b>The life of a goal</b><br><img src="docs/images/states.png" alt="Goal state machine"></td>
+<td width="50%"><b>What the team may touch in git</b><br><img src="docs/images/safety.png" alt="Git permission tiers"></td>
+</tr>
+</table>
+
+![Who does what: your session, spawned agents, hooks and files](docs/images/architecture.png)
+
+Diagrams are generated from [`docs/images/generate.py`](docs/images/generate.py) (`scripts/diagrams` also exports the PNGs).
+
 ## Requirements
 
 | Needed | Check with | Notes |
@@ -37,7 +54,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.2.0  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.1  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -167,6 +184,8 @@ claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict
 claude plugin validate plugins/devteam/agents --strict
 ```
+
+Changed the workflow? Regenerate the diagrams with `scripts/diagrams` (needs `python3` and Chrome) and commit them.
 
 ### Releasing
 
