@@ -57,18 +57,55 @@ sub lifecycle_names {
     return sort keys %n;
 }
 
-# The people behind the role ids: fixed fictional names and titles from team.tsv. Role ids stay the technical key.
-sub team_rows {
-    my ($all) = @_;
+# The people behind the role ids. Titles are fixed (team.tsv). Names are drawn at random from names.txt
+# when the team is first needed, kept in .devteam/team.json until the team is stood down, and never
+# repeat within a team. Role ids stay the technical key for hooks, config and spawning.
+sub team_roles {
     open my $h, '<', "$PLUGIN/team.tsv" or die "dt: team.tsv missing\n";
     my @r;
     while (my $line = <$h>) {
         chomp $line;
         next if $line =~ /^#/ || $line !~ /\S/;
-        my ($role, $name, $title, $where) = split /\t/, $line;
-        push @r, { role => $role, name => $name, title => $title, shipped => ($where eq 'main' || -f "$PLUGIN/agents/$role.md") ? 1 : 0 };
+        my ($role, $title, $where) = split /\t/, $line;
+        push @r, { role => $role, title => $title, shipped => ($where eq 'main' || -f "$PLUGIN/agents/$role.md") ? 1 : 0 };
     }
-    return grep { $all || $_->{shipped} } @r;
+    return @r;
+}
+sub name_pool {
+    my (%p, $sec);
+    open my $h, '<', "$PLUGIN/names.txt" or die "dt: names.txt missing\n";
+    while (my $line = <$h>) {
+        chomp $line;
+        next if $line =~ /^#/ || $line !~ /\S/;
+        if ($line =~ /^\[(first|last)\]$/) { $sec = $1; next }
+        push @{ $p{$sec} }, $line if $sec;
+    }
+    return @p{qw(first last)};
+}
+sub assign_names {
+    my ($reroll) = @_;
+    my $f = ddir() . '/team.json';
+    my $have = $reroll ? {} : (jread($f) // {});
+    my @missing = grep { !$have->{$_} } map { $_->{role} } team_roles();
+    return $have unless @missing;
+    my ($first, $last) = name_pool();
+    my %used_f = map { ((split ' ', $_)[0] => 1) } values %$have;
+    my %used_l = map { ((split ' ', $_)[1] => 1) } values %$have;
+    srand($ENV{DT_SEED}) if defined $ENV{DT_SEED};
+    for my $role (@missing) {
+        my @f = grep { !$used_f{$_} } @$first;
+        my @l = grep { !$used_l{$_} } @$last;
+        my ($fn, $ln) = ($f[rand @f], $l[rand @l]);
+        $used_f{$fn} = $used_l{$ln} = 1;
+        $have->{$role} = "$fn $ln";
+    }
+    jwrite($f, $have);
+    return $have;
+}
+sub team_rows {
+    my ($all) = @_;
+    my $names = assign_names();
+    return map { { %$_, name => $names->{ $_->{role} } } } grep { $all || $_->{shipped} } team_roles();
 }
 sub find_person {
     my ($q) = @_;
@@ -80,10 +117,13 @@ sub member_role { my $p = find_person($_[0]); $p ? $p->{role} : $_[0] }
 sub person_name { my $p = find_person($_[0]); $p ? $p->{name} : '' }
 
 sub c_team {
+    need_init();
     my ($o) = opts(@_);
-    printf "%-18s %-24s %s\n", $_->{name}, $_->{title}, $_->{role} . ($_->{shipped} ? '' : ' (planned)') for team_rows($o->{all});
+    assign_names(1) if $o->{reroll};
+    printf "%-22s %-22s %s\n", $_->{name}, $_->{title}, $_->{role} . ($_->{shipped} ? '' : ' (planned)') for team_rows($o->{all});
 }
 sub c_who {
+    need_init();
     my ($o, $p) = opts(@_);
     my $x = find_person($p->[0]) or die "dt: no team member '" . ($p->[0] // '') . "' (try: dt team --all)\n";
     print $o->{role} ? "$x->{role}\n" : "$x->{name}, $x->{title}\n";
@@ -173,7 +213,14 @@ sub c_engage {
     state_write($s);
     print "engaged for session $sid\n";
 }
-sub c_disengage { need_init(); my $s = state_read(); @$s{qw(engaged owner_session)} = (false, ''); state_write($s); print "disengaged\n" }
+sub c_disengage {
+    need_init();
+    my $s = state_read();
+    @$s{qw(engaged owner_session)} = (false, '');
+    state_write($s);
+    unlink ddir() . '/team.json';
+    print "disengaged (the team is stood down; a new one is drawn next time)\n";
+}
 
 sub c_goal {
     my ($sub, @a) = @_;

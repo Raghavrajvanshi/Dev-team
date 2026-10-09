@@ -2,6 +2,14 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.1.5] - 2026-10-10
+### Changed
+- Team names are now generated at runtime instead of being fixed: each role's name is drawn at random from `names.txt` when the team is first needed, kept for the engagement, never repeated within a team, and dropped when the team is stood down. Titles and role ids stay fixed. This replaces the fixed names shipped in 0.1.4.
+- Agent descriptions lead with the title only; the PM puts the person's name and title at the start of each brief (`dt who <role>`).
+### Added
+- `dt team --reroll` draws a new team; `dt disengage` (used by `/devteam:stop`) stands the team down.
+- Tests (235) check that no person is hardcoded in any agent, skill or script, and that names are random, unique, stable and resettable.
+
 ## [0.1.4] - 2026-10-10
 ### Added
 - Team personas: every role is a fixed fictional person with a name and title (Priya Raman, Software Architect; Marcus Lindqvist, Full-Stack Engineer; Aisha Rahman, QA Engineer; Tomas Herrera, Staff Engineer; Elena Petrova, Acceptance Verifier; Daniel Reyes, PM; Maya Okafor, Product Owner), kept in `plugins/devteam/team.tsv`.

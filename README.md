@@ -8,7 +8,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (225) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (235) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.4  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.5  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -97,19 +97,19 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 
 ### The team
 
-Each member is a fictional person with a fixed name and title, so you can talk to them naturally (`/devteam:ask priya ...`, `/devteam:changemodels` accepts first names). The technical role ids (`devteam:architect`, ...) are unchanged. Run `dt team` (or `/devteam:start`, which shows it) for the live list.
+Every role is a person with a title. **Names are drawn at random when the team is first needed** (at `/devteam:start`), kept for the whole engagement, and never repeat within a team; `/devteam:stop` stands the team down, so the next engagement draws new people. Titles and role ids are fixed. Talk to them naturally (`/devteam:ask <first name> ...`; `/devteam:changemodels` accepts first names too). Run `dt team` to see who is on the team now, and `dt team --reroll` to draw again.
 
-| Person | Title | Role id | Runs as |
-|---|---|---|---|
-| Maya Okafor | Product Owner (Goal Keeper) | `goal-keeper` | intake, in your session |
-| Daniel Reyes | Project Manager and Scrum Master | `project-manager` | the PM, in your session |
-| Priya Raman | Software Architect | `architect` | agent |
-| Marcus Lindqvist | Full-Stack Engineer | `fullstack-engineer` | agent |
-| Aisha Rahman | QA Engineer | `qa-engineer` | agent |
-| Tomas Herrera | Staff Engineer (code review) | `reviewer` | agent |
-| Elena Petrova | Acceptance Verifier | `goal-verifier` | agent |
+| Title | Role id | Runs as |
+|---|---|---|
+| Product Owner (Goal Keeper) | `goal-keeper` | intake, in your session |
+| Project Manager and Scrum Master | `project-manager` | the PM, in your session |
+| Software Architect | `architect` | agent |
+| Full-Stack Engineer | `fullstack-engineer` | agent |
+| QA Engineer | `qa-engineer` | agent |
+| Staff Engineer (code review) | `reviewer` | agent |
+| Acceptance Verifier | `goal-verifier` | agent |
 
-Planned: Wei Chen (Backend), Sofia Marini (Frontend), Kenji Watanabe (Mobile), Hannah Becker (DevOps), Idris Bello (Security), Lucia Fernandes (UX), Oliver Grant (Technical Writer), Nadia Haddad (Research). Names are invented; any resemblance to real people is coincidental.
+Planned: Backend, Frontend, Mobile, DevOps, Security, UX, Technical Writer and Research roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
 
 ### Lanes and lifecycles
 
@@ -148,7 +148,7 @@ Planned: Wei Chen (Backend), Sofia Marini (Frontend), Kenji Watanabe (Mobile), H
 ## Develop
 
 ```bash
-prove tests/                                        # 225 tests
+prove tests/                                        # 235 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

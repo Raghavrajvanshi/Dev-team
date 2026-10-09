@@ -6,7 +6,7 @@ disable-model-invocation: true
 ---
 # ask
 
-Roles (or the person's first name): architect (Priya), reviewer (Tomas), qa-engineer (Aisha), fullstack-engineer (Marcus), goal-verifier (Elena). Resolve with `dt who <arg> --role`; `dt team` lists everyone.
+Roles: architect, reviewer, qa-engineer, fullstack-engineer, goal-verifier. The user may use a role id or the person's first name; `dt team` lists everyone, and `dt who <arg> --role` resolves either to the role id.
 
 1. If no goal is ACTIVE, `dt state set adhoc=true` so the spawn guard allows this one-off. In ACTIVE the normal guard applies and the spawn counts toward the cap.
 2. Spawn `devteam:<role>` with a brief: the question, "answer only; change no files, state or git", and the reply limit of 150 words. Use `dt models get <role>` as in `orchestrate`.

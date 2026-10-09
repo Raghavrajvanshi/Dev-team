@@ -6,62 +6,96 @@ require "$FindBin::Bin/lib.pl";
 our ($PLUGIN, $REPO);
 
 sub slurp { open my $h, '<', $_[0] or die "$_[0]: $!"; local $/; <$h> }
-my @rows;
+
+# --- the data files ---
+my @roles;
 for (split /\n/, slurp("$PLUGIN/team.tsv")) {
     next if /^#/ || !/\S/;
-    my ($role, $name, $title, $where) = split /\t/;
-    push @rows, { role => $role, name => $name, title => $title, where => $where };
+    my ($role, $title, $where) = split /\t/;
+    push @roles, { role => $role, title => $title, where => $where };
 }
-
-# --- the roster itself ---
 my %seen;
-is(scalar(grep { $seen{ $_->{role} }++ } @rows), 0, 'roles are unique');
-%seen = ();
-is(scalar(grep { $seen{ $_->{name} }++ } @rows), 0, 'full names are unique');
-%seen = ();
-is(scalar(grep { $seen{ (split ' ', $_->{name})[0] }++ } @rows), 0, 'first names are unique, so they can be used to address people');
-is(scalar(grep { $_->{name} !~ /^[A-Z][a-z]+ [A-Z][A-Za-z]+$/ } @rows), 0, 'names are plain ASCII first and last names');
-is(scalar(grep { !defined $_->{where} || $_->{where} !~ /^(?:main|agent)$/ } @rows), 0, 'every row says where the role runs');
+is(scalar(grep { $seen{ $_->{role} }++ } @roles), 0, 'roles are unique');
+is(scalar(grep { !length($_->{title} // '') || ($_->{where} // '') !~ /^(?:main|agent)$/ } @roles), 0, 'every role has a title and says where it runs');
+is(scalar(grep { /\t.*\t.*\t/ } split /\n/, slurp("$PLUGIN/team.tsv")), 0, 'the roster holds no names: names are generated at runtime');
 
-# --- agents and skills must carry the same names as the roster ---
-for my $r (grep { $_->{where} eq 'agent' && -f "$PLUGIN/agents/$_->{role}.md" } @rows) {
-    my $a = slurp("$PLUGIN/agents/$r->{role}.md");
-    like($a, qr/^description: \Q$r->{name}\E, \Q$r->{title}\E[:.]/m, "$r->{role}: description starts with its name and title");
-    like($a, qr/You are \Q$r->{name}\E,/, "$r->{role}: the prompt introduces its person");
+my (%pool, $sec);
+for (split /\n/, slurp("$PLUGIN/names.txt")) {
+    next if /^#/ || !/\S/;
+    if (/^\[(first|last)\]$/) { $sec = $1; next }
+    push @{ $pool{$sec} }, $_;
 }
-my %skill = ('goal-keeper' => 'goal', 'project-manager' => 'orchestrate');
-for my $r (grep { $skill{ $_->{role} } } @rows) {
-    like(slurp("$PLUGIN/skills/$skill{$r->{role}}/SKILL.md"), qr/\Q$r->{name}\E/, "$skill{$r->{role}} skill names $r->{name}");
+for my $k (qw(first last)) {
+    cmp_ok(scalar @{ $pool{$k} }, '>=', 40, "$k name pool is large enough to give each team distinct people");
+    is(scalar(grep { !/^[A-Z][a-z]+$/ } @{ $pool{$k} }), 0, "$k names are plain ASCII words");
+    my %u;
+    is(scalar(grep { $u{$_}++ } @{ $pool{$k} }), 0, "$k names are unique");
 }
-like(slurp("$PLUGIN/agents/project-manager.md"), qr/Daniel Reyes/, 'PM mode agent is the same person as the PM skill');
-like(slurp("$PLUGIN/skills/architect-intake/SKILL.md"), qr/Priya Raman/, 'architect-intake speaks as the Architect');
 
-# --- CLI ---
+# --- no person is hardcoded in any agent, skill or script ---
+my $first = join '|', @{ $pool{first} };
+my $last = join '|', @{ $pool{last} };
+my @files = (glob("$PLUGIN/agents/*.md"), glob("$PLUGIN/skills/*/SKILL.md"), "$PLUGIN/bin/dt", glob("$PLUGIN/lib/*.pm"), glob("$PLUGIN/lib/DT/*.pm"));
+is(scalar(grep { slurp($_) =~ /\b(?:$first) (?:$last)\b/ } @files), 0, 'no agent, skill or script hardcodes a person (examples are not drawn from the pool)');
+for my $r (grep { -f "$PLUGIN/agents/$_->{role}.md" } @roles) {
+    like(slurp("$PLUGIN/agents/$r->{role}.md"), qr/^description: \Q$r->{title}\E:/m, "$r->{role}: description leads with its title");
+}
+
+# --- runtime generation ---
 new_repo();
 dt('init');
+$ENV{DT_SEED} = 7;
 my ($rc, $out) = dt('team');
 is($rc, 0, 'dt team');
-like($out, qr/Priya Raman\s+Software Architect\s+architect\n/, 'lists shipped members with name, title and role');
-unlike($out, qr/Wei Chen/, 'planned roles are not listed by default');
-($rc, $out) = dt('team', '--all');
-like($out, qr/Wei Chen\s+Backend Engineer\s+backend-engineer \(planned\)/, '--all lists planned roles, flagged');
+my @lines = split /\n/, $out;
+is(scalar @lines, 7, 'seven shipped members');
+like($out, qr/Software Architect\s+architect\n/, 'lists title and role id');
+unlike($out, qr/Backend Engineer/, 'planned roles are hidden by default');
+my @firsts = map { (split ' ', $_)[0] } @lines;
+my %f;
+is(scalar(grep { $f{$_}++ } @firsts), 0, 'no first name repeats within a team');
+for my $l (@lines) { my ($fn, $ln) = split ' ', $l; ok((grep { $_ eq $fn } @{ $pool{first} }) && (grep { $_ eq $ln } @{ $pool{last} }), "drawn from the pool: $fn $ln") }
 
+my $first_run = $out;
+$ENV{DT_SEED} = 99;    # a different seed must not matter once names exist
+($rc, $out) = dt('team');
+is($out, $first_run, 'names are stable for the whole engagement');
+($rc, $out) = dt('team', '--all');
+like($out, qr/Backend Engineer\s+backend-engineer \(planned\)/, '--all lists planned roles, flagged, with names already drawn');
+
+$ENV{DT_SEED} = 99;
+($rc, $out) = dt('team', '--reroll');
+isnt($out, $first_run, '--reroll draws a new team');
+
+# --- lookup ---
+my ($arch_name) = grep { /architect/ } split /\n/, $out;
+(my $full = $arch_name) =~ s/\s{2,}.*//;
+my $arch_first = (split ' ', $full)[0];
 ($rc, $out) = dt('who', 'architect');
-is($out, "Priya Raman, Software Architect\n", 'who resolves a role id');
-($rc, $out) = dt('who', 'priya');
-is($out, "Priya Raman, Software Architect\n", 'who resolves a first name, any case');
-($rc, $out) = dt('who', 'Marcus Lindqvist', '--role');
-is($out, "fullstack-engineer\n", 'who --role resolves a full name to the role id');
-($rc, $out) = dt('who', 'nobody');
-isnt($rc, 0, 'unknown person is an error');
+is($out, "$full, Software Architect\n", 'who resolves a role id');
+($rc, $out) = dt('who', lc $arch_first);
+is($out, "$full, Software Architect\n", 'who resolves a first name, any case');
+($rc, $out) = dt('who', $full, '--role');
+is($out, "architect\n", 'who --role resolves a full name to the role id');
+($rc, $out) = dt('who', 'nobody-here');
+isnt($rc, 0, 'an unknown person is an error');
 
 # --- models accept names and show them ---
 ($rc, $out) = dt('models', 'show');
-like($out, qr/^architect\s+opus\s+high\s+recommended\s+Priya Raman$/m, 'models show lists the person next to the role');
-($rc, $out) = dt('models', 'set', 'priya,marcus', '--model', 'haiku');
-is($rc, 0, 'models set accepts first names');
-($rc, $out) = dt('models', 'get', 'Marcus');
-like($out, qr/model=haiku/, 'and the change landed on the right role');
+like($out, qr/^architect\s+opus\s+high\s+recommended\s+\Q$full\E$/m, 'models show lists the person next to the role');
+($rc, $out) = dt('models', 'set', $arch_first, '--model', 'haiku');
+is($rc, 0, 'models set accepts a first name');
 ($rc, $out) = dt('models', 'get', 'architect');
-like($out, qr/model=haiku/, 'Priya is the architect');
+like($out, qr/model=haiku/, 'and the change landed on the right role');
+
+# --- standing the team down draws a new one next time ---
+my ($before) = dt('team');
+dt('engage', 's1');
+ok(-f "$REPO/.devteam/team.json", 'names are kept in .devteam/team.json');
+dt('disengage');
+ok(!-f "$REPO/.devteam/team.json", 'disengaging stands the team down');
+$ENV{DT_SEED} = 3;
+my ($rc2, $after) = dt('team');
+my ($rc3, $again) = dt('team');
+is($after, $again, 'and the next engagement is stable again');
 done_testing;
