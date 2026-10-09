@@ -25,13 +25,13 @@ my %CMD = (
     engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
     verify => \&c_verify, gate => \&c_gate, close => \&c_close, lifecycle => \&c_lifecycle,
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
-    resync => \&c_resync, ledger => \&c_ledger,
+    resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
 );
 
 my $cmd = shift @ARGV // '';
 if (!$CMD{$cmd}) { print STDERR "usage: dt <" . join('|', sort keys %CMD) . "> ...\n"; exit 2 }
 our $EXIT = 0;
-my %LOCKED = map { $_ => 1 } qw(state engage disengage goal grant branch resync criteria models);
+my %LOCKED = map { $_ => 1 } qw(state engage disengage goal grant branch resync criteria models queue);
 eval { $LOCKED{$cmd} ? locked(sub { $CMD{$cmd}->(@ARGV) }) : $CMD{$cmd}->(@ARGV); 1 } or do { print STDERR $@; exit 1 };
 exit $EXIT;
 
@@ -154,6 +154,7 @@ sub c_goal {
         $t =~ s/\{\{id\}\}/$id/g;
         $t =~ s/\{\{title\}\}/$title/g;
         spit("$dir/goal.md", $t);
+        spit("$dir/board.md", slurp("$PLUGIN/templates/board.md") // "# Board\n");
         jwrite("$dir/criteria.json", { criteria => [], locks => {} });
         @$s{qw(goal lane lifecycle spawns spawn_cap main_turns turn_cap returns)} = ($id, '', '', 0, 0, 0, 0, 0);
         @$s{qw(retries git_grants blocked_reason ledger_offset integration_branch original_branch original_sha)} = ({}, {}, '', 0, '', '', '');
@@ -182,7 +183,17 @@ sub c_goal {
         ledger_add({ event => 'goal_confirm', goal => $s->{goal}, lane => $lane, lifecycle => $lc, grants => [ sort keys %{ $s->{git_grants} } ] });
         return print "$s->{goal} confirmed: lane=$lane lifecycle=$lc grants=" . join(',', sort keys %{ $s->{git_grants} }) . "\n";
     }
-    die "dt goal: new <title> | confirm --lane L --lifecycle N [--grants a,b]\n";
+    if (($sub // '') eq 'lane') {
+        my $lane = $a[0] // '';
+        my $cfg = config_read();
+        die "dt goal lane tiny|standard|large\n" unless $cfg->{lanes}{$lane};
+        die "dt: no goal to re-lane\n" unless length $s->{goal} && $s->{status} =~ /^(?:INTAKE|ACTIVE|PAUSED|BLOCKED)$/;
+        @$s{qw(lane spawn_cap turn_cap)} = ($lane, $cfg->{lanes}{$lane}{spawn_cap}, $cfg->{lanes}{$lane}{turn_cap});
+        state_write($s);
+        ledger_add({ event => 'lane', goal => $s->{goal}, lane => $lane });
+        return print "lane = $lane (spawn cap $s->{spawn_cap}, spawns used $s->{spawns})\n";
+    }
+    die "dt goal: new <title> | confirm --lane L --lifecycle N [--grants a,b] | lane L\n";
 }
 
 sub c_criteria {
@@ -201,6 +212,24 @@ sub c_criteria {
         jwrite($f, $c);
         seal();
         return print "criterion $o->{id} added\n";
+    }
+    if ($sub eq 'remove') {
+        my $n = @{ $c->{criteria} };
+        @{ $c->{criteria} } = grep { $_->{id} ne ($p->[0] // '') } @{ $c->{criteria} };
+        die "dt: unknown criterion '" . ($p->[0] // '') . "'\n" if @{ $c->{criteria} } == $n;
+        jwrite($f, $c);
+        seal();
+        return print "$p->[0] removed\n";
+    }
+    if ($sub eq 'edit') {
+        my ($cr) = grep { $_->{id} eq ($p->[0] // '') } @{ $c->{criteria} };
+        die "dt: unknown criterion '" . ($p->[0] // '') . "'\n" unless $cr;
+        $cr->{text} = $o->{text} if defined $o->{text};
+        $cr->{check} = $o->{check} if defined $o->{check};
+        @$cr{qw(passes evidence)} = (false, undef);
+        jwrite($f, $c);
+        seal();
+        return print "$p->[0] edited (must be verified again)\n";
     }
     if ($sub eq 'lock') {
         for my $file (@$p) {
@@ -227,7 +256,7 @@ sub c_criteria {
         print "locked: $_\n" for sort keys %{ $c->{locks} };
         return;
     }
-    die "dt criteria: add|lock|confirm|show\n";
+    die "dt criteria: add|edit|remove|lock|confirm|show\n";
 }
 
 sub verify_all {
@@ -266,7 +295,17 @@ sub c_verify { need_init(); $EXIT = verify_all() ? 0 : 1; return }
 sub c_gate {
     my ($sub, @a) = @_;
     need_init();
-    die "dt gate run [--full] [--cwd DIR]\n" unless ($sub // '') eq 'run';
+    if (($sub // '') eq 'set') {
+        my $cfg = config_read();
+        for my $kv (@a) {
+            my ($k, $v) = split /=/, $kv, 2;
+            die "dt gate set: use format|typecheck|test|test_affected|install|timeout=VALUE\n" unless defined $v && $k =~ /^(?:format|typecheck|test|test_affected|install|timeout)$/;
+            $cfg->{gates}{$k} = $k eq 'timeout' ? $v + 0 : $v;
+        }
+        config_write($cfg);
+        return print "gates updated\n";
+    }
+    die "dt gate run [--full] [--cwd DIR] | dt gate set KEY=VALUE...\n" unless ($sub // '') eq 'run';
     my ($o) = opts(@a);
     my ($ok, $msg) = run_gates($o->{cwd} // root(), $o->{full});
     print "$msg\n";
@@ -448,6 +487,16 @@ sub c_status {
     print "unattended-ready: " . allow_ready() . "\n";
     my $t = check_seal();
     print "TAMPER: protected files changed outside dt: @$t\n" if @$t;
+}
+
+sub c_queue {
+    my ($sub, @a) = @_;
+    need_init();
+    my $s = state_read();
+    $sub //= 'show';
+    if ($sub eq 'add') { push @{ $s->{queue} }, join(' ', @a); state_write($s); return print "queued (" . scalar(@{ $s->{queue} }) . ")\n" }
+    if ($sub eq 'pop') { my $q = shift @{ $s->{queue} }; state_write($s); return print(($q // ''), "\n") }
+    print map { ($_ + 1) . ". $s->{queue}[$_]\n" } 0 .. $#{ $s->{queue} };
 }
 
 sub c_resync { need_init(); seal(); print "protected files re-sealed (you accepted the current contents)\n" }

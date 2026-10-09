@@ -144,4 +144,34 @@ dt('models', 'set', 'qa-engineer', '--model', 'recommended', '--effort', 'recomm
 ($rc, $out) = dt('models', 'get', 'qa-engineer');
 like($out, qr/changed=no/, 'recommended restores the default');
 
+# --- lane change ---
+($rc, $out) = dt('goal', 'lane', 'large');
+is($rc, 1, 'cannot re-lane without a running goal');
+
+# --- criteria edit/remove, gate set, queue, board ---
+dt('goal', 'new', 'second goal');
+ok(-f "$REPO/.devteam/goals/G-002/board.md", 'a new goal gets a board');
+dt('criteria', 'add', '--id', 'C1', '--text', 'WHEN a THEN b', '--check', 'true');
+($rc, $out) = dt('goal', 'lane', 'large');
+is($rc, 0, 'lane can be changed during intake');
+is(state()->{spawn_cap}, 12, 'and the caps follow it');
+($rc, $out) = dt('criteria', 'edit', 'C1', '--text', 'WHEN c THEN d');
+is($rc, 0, 'criteria edit');
+($rc, $out) = dt('criteria', 'show');
+like($out, qr/WHEN c THEN d/, 'edit applied');
+($rc, $out) = dt('criteria', 'remove', 'C9');
+isnt($rc, 0, 'removing an unknown criterion fails');
+($rc, $out) = dt('criteria', 'remove', 'C1');
+is($rc, 0, 'criteria remove');
+($rc, $out) = dt('gate', 'set', 'test=make test', 'timeout=60');
+is($rc, 0, 'gate set');
+($rc, $out) = dt('gate', 'set', 'bogus=1');
+isnt($rc, 0, 'gate set rejects unknown keys');
+dt('queue', 'add', 'fix the footer');
+dt('queue', 'add', 'second');
+($rc, $out) = dt('queue');
+like($out, qr/1\. fix the footer\n2\. second/, 'queue lists in order');
+($rc, $out) = dt('queue', 'pop');
+is($out, "fix the footer\n", 'pop returns the first');
+
 done_testing;
