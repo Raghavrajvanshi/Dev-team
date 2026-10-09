@@ -27,7 +27,7 @@ my %CMD = (
     verify => \&c_verify, gate => \&c_gate, close => \&c_close, lifecycle => \&c_lifecycle,
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
-    team => \&c_team, who => \&c_who,
+    team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge,
 );
 
 my $cmd = shift @ARGV // '';
@@ -127,6 +127,71 @@ sub c_who {
     my ($o, $p) = opts(@_);
     my $x = find_person($p->[0]) or die "dt: no team member '" . ($p->[0] // '') . "' (try: dt team --all)\n";
     print $o->{role} ? "$x->{role}\n" : "$x->{name}, $x->{title}\n";
+}
+
+# Run an argv list (no shell) with a timeout; returns the exit code.
+sub run_argv {
+    my ($timeout, @argv) = @_;
+    my $pid = fork() // die "fork: $!\n";
+    if (!$pid) { open STDOUT, '>', '/dev/null'; open STDERR, '>&', \*STDOUT; exec @argv or exit 127 }
+    my $to = 0;
+    eval { local $SIG{ALRM} = sub { $to = 1; kill 'KILL', $pid; die "timeout\n" }; alarm $timeout; waitpid($pid, 0); alarm 0 };
+    waitpid($pid, 0) if $to;
+    return $to ? 124 : $? >> 8;
+}
+
+sub find_chrome {
+    return $ENV{DT_CHROME} if $ENV{DT_CHROME} && -x $ENV{DT_CHROME};
+    for my $p ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium') { return $p if -x $p }
+    for my $n (qw(google-chrome google-chrome-stable chromium chromium-browser chrome)) {
+        for my $d (split /:/, $ENV{PATH} // '') { return "$d/$n" if -x "$d/$n" }
+    }
+    return;
+}
+
+# dt shot [--serve DIR] [--widths 390,1280] [--height N] [--name NAME] <url | path under DIR>
+# Headless-Chrome screenshots, so agents can look at what they built instead of only testing it.
+sub c_shot {
+    my ($o, $p) = opts(@_);
+    my $target = $p->[0] // die "dt shot [--serve DIR] [--widths 390,768,1280] [--height N] [--name NAME] <url or path>\n";
+    my $chrome = find_chrome() or die "dt: no Chrome/Chromium found (set DT_CHROME to its path)\n";
+    my @widths = grep { /^\d+$/ } split /,/, ($o->{widths} // 1280);
+    my $height = ($o->{height} // 2400) =~ /^(\d+)$/ ? $1 : 2400;
+    my ($name) = ($o->{name} // $target) =~ /([\w.-]+)\/?$/;
+    $name =~ s/\.html?$//;
+    my $dir = (goal_dir() ? goal_dir() . '/evidence/shots' : ddir() . '/shots');
+    make_path($dir);
+    my ($url, $srv) = ($target);
+    if (defined $o->{serve} && $o->{serve} ne '1') {
+        die "dt: --serve needs python3\n" unless grep { -x "$_/python3" } split /:/, $ENV{PATH};
+        my $port = 20000 + int(rand(20000));
+        $srv = fork() // die "fork: $!\n";
+        if (!$srv) { open STDOUT, '>', '/dev/null'; open STDERR, '>&', \*STDOUT; exec 'python3', '-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $o->{serve} or exit 127 }
+        require IO::Socket::INET;
+        for (1 .. 30) { last if IO::Socket::INET->new(PeerAddr => '127.0.0.1', PeerPort => $port, Timeout => 1); select undef, undef, undef, 0.1 }
+        (my $path = $target) =~ s{^/}{};
+        $url = "http://127.0.0.1:$port/$path";
+    }
+    my @out;
+    for my $w (@widths) {
+        my $f = "$dir/$name-$w.png";
+        my $rc = run_argv(60, $chrome, '--headless=new', '--disable-gpu', '--hide-scrollbars', "--window-size=$w,$height",
+            '--virtual-time-budget=5000', "--screenshot=$f", $url);
+        push @out, (-s $f ? $f : "FAILED ($rc) $f");
+    }
+    if ($srv) { kill 'TERM', $srv; waitpid($srv, 0) }
+    print "$_\n" for @out;
+    $EXIT = 1 if grep { /^FAILED/ } @out;
+}
+
+# dt knowledge [--stale DAYS]: cached research topics and how old they are.
+sub c_knowledge {
+    my ($o) = opts(@_);
+    need_init();
+    my @rows = map { [ (/([^\/]+)\.md$/)[0], int((time - (stat $_)[9]) / 86400), $_ ] } glob ddir() . '/knowledge/*.md';
+    @rows = grep { $_->[1] >= $o->{stale} } @rows if defined $o->{stale};
+    return print "no cached knowledge\n" unless @rows;
+    printf "%-28s %4d days  %s\n", @$_ for sort { $a->[0] cmp $b->[0] } @rows;
 }
 
 sub c_init {

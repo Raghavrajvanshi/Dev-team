@@ -6,7 +6,7 @@
     {
       "name": "devteam",
       "source": "./plugins/devteam",
-      "description": "Goal-gated, token-lean software team of agents: Goal Keeper, PM, Architect, engineers, QA and Reviewer."
+      "description": "Goal-gated, token-lean software team of agents: PM, Architect, researcher, designer, engineers, QA and reviewer."
     }
   ]
 }

@@ -5,6 +5,8 @@ user-invocable: false
 ---
 # Craft charter (every line must earn its place)
 
+**Minimal means no waste, not low ambition.** These rules remove code nobody needs. They never justify thinner design, less content, fewer states or weaker polish than the goal's quality criteria require; meeting a quality criterion is not slop. Size budgets prevent waste; they are not targets and never a reason to cut quality.
+
 1. **Smallest change** that meets a done-criterion. Every added line traces to a criterion or to the task brief.
 2. **Reuse before write.** Search for an existing helper or pattern and extend it. The project's conventions beat your preferences.
 3. **No speculative generality.** No abstraction with one caller, no config for a fixed value, no unused parameter or export, no "future-proofing".

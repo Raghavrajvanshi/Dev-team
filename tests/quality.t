@@ -1,0 +1,72 @@
+use strict;
+use warnings;
+use FindBin;
+use JSON::PP;
+use Test::More;
+require "$FindBin::Bin/lib.pl";
+our ($PLUGIN, $REPO);
+
+sub slurp { open my $h, '<', $_[0] or die "$_[0]: $!"; local $/; <$h> }
+sub front { slurp("$PLUGIN/agents/$_[0].md") =~ /\A---\n(.*?)\n---/s ? $1 : '' }
+
+# --- the new roles can look things up and see results ---
+for my $role (qw(researcher ux-designer architect)) {
+    like(front($role), qr/^tools:.*\bWebSearch\b.*\bWebFetch\b/m, "$role can search and fetch the web, so it does not work from memory");
+}
+like(front('fullstack-engineer'), qr/^tools:.*\bWebFetch\b/m, 'engineers can confirm an API in the docs');
+unlike(front('reviewer'), qr/^tools:.*\b(?:Write|Edit)\b/m, 'the reviewer stays read-only');
+like(front('ux-designer'), qr/^effort: high$/m, 'the designer thinks at high effort');
+like(front('fullstack-engineer'), qr/^effort: high$/m, 'engineers think at high effort by default');
+like(front('reviewer'), qr/^effort: high$/m, 'the reviewer thinks at high effort');
+
+# --- agent frontmatter and the recommended defaults must agree ---
+new_repo();
+dt('init');
+for my $role (qw(architect fullstack-engineer qa-engineer reviewer goal-verifier researcher ux-designer)) {
+    my ($model) = front($role) =~ /^model: (\w+)$/m;
+    my ($effort) = front($role) =~ /^effort: (\w+)$/m;
+    my ($rc, $out) = dt('models', 'get', $role);
+    like($out, qr/model=\Q$model\E effort=\Q$effort\E changed=no/, "$role: frontmatter matches the recommended default ($model/$effort)");
+}
+
+# --- the process reaches the team ---
+my $orch = slurp("$PLUGIN/skills/orchestrate/SKILL.md");
+like($orch, qr/spawn `researcher`/, 'the PM researches before designing');
+like($orch, qr/spawn `ux-designer` \(spec mode\)/, 'user-facing goals get a design spec');
+like($orch, qr/critique mode/, 'and a critique pass on screenshots');
+like($orch, qr/At most 2 polish rounds/, 'with bounded polish rounds');
+like($orch, qr/Quality is never traded for spawns/, 'and quality is not traded for spawn caps');
+my $goal = slurp("$PLUGIN/skills/goal/SKILL.md");
+like($goal, qr/Structural criteria are necessary, not sufficient/, 'intake requires a quality criterion for user-facing goals');
+like($goal, qr/1-3 live references/, 'and asks for live references');
+like(slurp("$PLUGIN/skills/craft/SKILL.md"), qr/Minimal means no waste, not low ambition/, 'the craft charter no longer pushes quality down');
+like(slurp("$PLUGIN/agents/architect.md"), qr/never a reason to cut design fidelity/, 'the complexity budget is not a ceiling on quality');
+like(slurp("$PLUGIN/agents/goal-verifier.md"), qr/open the screenshots.*with Read/s, 'the verifier judges quality from screenshots');
+like(slurp("$PLUGIN/skills/design-quality/SKILL.md"), qr/Flat clip-art boxes are a defect/, 'the design-quality skill names the failure we saw');
+like(slurp("$PLUGIN/skills/research/SKILL.md"), qr/Never build from memory|never build from memory/i, 'the research skill forbids working from memory');
+
+# --- cached knowledge ---
+my ($rc, $out) = dt('knowledge');
+like($out, qr/no cached knowledge/, 'knowledge starts empty');
+sh('mkdir -p .devteam/knowledge && echo "retrieved: 2026-10-10" > .devteam/knowledge/react.md && echo x > .devteam/knowledge/old.md && touch -t 202401010000 .devteam/knowledge/old.md');
+($rc, $out) = dt('knowledge');
+like($out, qr/^react\s+0 days/m, 'a fresh topic is listed with its age');
+($rc, $out) = dt('knowledge', '--stale', '30');
+like($out, qr/^old\s+\d{3,} days/m, '--stale lists topics older than the threshold');
+unlike($out, qr/react/, 'and not the fresh ones');
+
+# --- screenshots (with a stand-in browser so the test needs no real Chrome) ---
+my $fake = "$REPO/fake-chrome";
+open my $f, '>', $fake or die;
+print $f "#!/bin/sh\nfor a in \"\$@\"; do case \"\$a\" in --screenshot=*) out=\"\${a#--screenshot=}\";; --window-size=*) size=\"\${a#--window-size=}\";; esac; done\nprintf 'PNG %s %s' \"\$size\" \"\$*\" > \"\$out\"\n";
+close $f;
+chmod 0755, $fake;
+$ENV{DT_CHROME} = $fake;
+dt('goal', 'new', 'shots');
+($rc, $out) = dt('shot', '--widths', '390,1280', '--name', 'home', 'file:///site/index.html');
+is($rc, 0, 'dt shot runs') or diag $out;
+my @paths = split /\n/, $out;
+is(scalar @paths, 2, 'one screenshot per width');
+like($paths[0], qr{/goals/G-001/evidence/shots/home-390\.png$}, 'screenshots land in the goal evidence');
+like(slurp($paths[1]), qr/PNG 1280,2400/, 'the requested window size reached the browser');
+done_testing;

@@ -90,7 +90,7 @@ sub state_protect {
     my $root = root();
     if ($f =~ m{^\Q$root\E/\.devteam/(.*)$}) {
         my $rel = $1;
-        return if $rel =~ m{^(?:adr/|discussions/|goals/[^/]+/(?:design\.md$|reports/))};
+        return if $rel =~ m{^(?:adr/|discussions/|knowledge/|goals/[^/]+/(?:design\.md|design-spec\.md|reference\.md|evidence/shots/|reports/))};
         deny("subagents may not write .devteam/$rel (state, criteria and the board belong to the PM and dt)");
     }
     (my $rel = $f) =~ s{^\Q$root\E/(?:\.claude/worktrees/[^/]+/)?}{} or return;

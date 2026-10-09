@@ -44,22 +44,27 @@ is((spawn(type => 'Explore'))[1], '', 'ACTIVE: Explore is allowed and not counte
 is(state()->{spawns}, 1, 'Explore did not count');
 is(decision((spawn(type => 'devteam:fullstack-engineer', extra => { isolation => 'worktree' }))[1]), 'deny', 'worktree needs the task_branches grant');
 is(decision((spawn(type => 'devteam:architect', agent => 1))[1]), 'deny', 'agents cannot spawn agents');
-spawn(type => 'devteam:qa-engineer') for 1 .. 3;
+spawn(type => 'devteam:qa-engineer') for 1 .. 5;
 spawn(type => 'devteam:reviewer');
-is(state()->{spawns}, 5, 'five spawns counted');
-like(reason((spawn(type => 'devteam:reviewer'))[1]), qr/spawn cap reached \(5\/5/, 'the sixth is refused at the cap');
+is(state()->{spawns}, 7, 'seven spawns counted');
+like(reason((spawn(type => 'devteam:reviewer'))[1]), qr/spawn cap reached \(7\/7/, 'the eighth is refused at the cap');
 
 # --- another session is ignored for main-thread events ---
 ($rc, $out) = hook('guard', { session_id => 'OTHER', tool_name => 'Agent', tool_input => { subagent_type => 'general-purpose' } });
 is($out, '', 'a different session is not governed');
 
 # --- state-protect ---
+# (research, design and screenshot evidence are writable by their owners; see below)
 sub write_in { my ($f, %a) = @_; hook('state-protect', agent_in(tool_name => 'Write', tool_input => { file_path => $f }, %a)) }
 is(decision((write_in("$REPO/.devteam/state.json"))[1]), 'deny', 'subagent cannot write state.json');
 is(decision((write_in(".devteam/goals/G-001/criteria.json"))[1]), 'deny', 'relative path to criteria.json is denied');
 is(decision((write_in("$REPO/.devteam/goals/../goals/G-001/board.md"))[1]), 'deny', 'path tricks are normalised');
 is((write_in("$REPO/.devteam/adr/0001.md"))[1], '', 'ADRs are allowed');
 is((write_in("$REPO/.devteam/goals/G-001/design.md"))[1], '', 'design.md is allowed');
+is((write_in("$REPO/.devteam/goals/G-001/reference.md"))[1], '', 'reference.md (research) is allowed');
+is((write_in("$REPO/.devteam/goals/G-001/design-spec.md"))[1], '', 'design-spec.md is allowed');
+is((write_in("$REPO/.devteam/knowledge/react.md"))[1], '', 'cached knowledge is allowed');
+is(decision((write_in("$REPO/.devteam/goals/G-001/criteria.json"))[1]), 'deny', 'criteria.json is still protected');
 is((write_in("$REPO/src/app.js"))[1], '', 'ordinary source files are untouched');
 is((hook('state-protect', { session_id => 's1', tool_name => 'Write', tool_input => { file_path => "$REPO/.devteam/state.json" } }))[1], '', 'the main thread is not restricted');
 sh('echo t > test_a.t && git add test_a.t && git commit -q -m t');

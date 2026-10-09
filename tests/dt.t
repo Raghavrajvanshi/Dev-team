@@ -51,7 +51,7 @@ isnt($rc, 0, 'rejects unknown lifecycle');
 is($rc, 0, 'confirm') or diag $out;
 my $s = state();
 is($s->{status}, 'ACTIVE', 'ACTIVE after confirm');
-is($s->{spawn_cap}, 5, 'standard spawn cap');
+is($s->{spawn_cap}, 7, 'standard spawn cap');
 ok($s->{git_grants}{integration} && $s->{git_grants}{restore}, 'grants recorded');
 
 # --- branch handling ---
@@ -154,7 +154,7 @@ ok(-f "$REPO/.devteam/goals/G-002/board.md", 'a new goal gets a board');
 dt('criteria', 'add', '--id', 'C1', '--text', 'WHEN a THEN b', '--check', 'true');
 ($rc, $out) = dt('goal', 'lane', 'large');
 is($rc, 0, 'lane can be changed during intake');
-is(state()->{spawn_cap}, 12, 'and the caps follow it');
+is(state()->{spawn_cap}, 20, 'and the caps follow it');
 ($rc, $out) = dt('criteria', 'edit', 'C1', '--text', 'WHEN c THEN d');
 is($rc, 0, 'criteria edit');
 ($rc, $out) = dt('criteria', 'show');

@@ -63,11 +63,11 @@ sub default_state {
 sub default_config {
     my %m = (
         architect => ['opus', 'high'], 'security-engineer' => ['sonnet', 'high'],
-        'fullstack-engineer' => ['sonnet', 'medium'], 'backend-engineer' => ['sonnet', 'medium'],
+        'fullstack-engineer' => ['sonnet', 'high'], 'backend-engineer' => ['sonnet', 'medium'],
         'frontend-engineer' => ['sonnet', 'medium'], 'mobile-engineer' => ['sonnet', 'medium'],
         'devops-engineer' => ['sonnet', 'medium'], 'qa-engineer' => ['sonnet', 'medium'],
-        reviewer => ['sonnet', 'medium'], 'goal-verifier' => ['sonnet', 'low'],
-        researcher => ['haiku', 'low'], 'tech-writer' => ['haiku', 'low'], 'ux-designer' => ['sonnet', 'medium'],
+        reviewer => ['sonnet', 'high'], 'goal-verifier' => ['sonnet', 'medium'],
+        researcher => ['sonnet', 'medium'], 'tech-writer' => ['haiku', 'low'], 'ux-designer' => ['sonnet', 'high'],
     );
     return {
         version => 1,
@@ -75,8 +75,8 @@ sub default_config {
         escalation => 'opus', models_chosen => false,
         lanes => {
             tiny     => { spawn_cap => 0,  turn_cap => 15 },
-            standard => { spawn_cap => 5,  turn_cap => 0 },
-            large    => { spawn_cap => 12, turn_cap => 0 },
+            standard => { spawn_cap => 7,  turn_cap => 0 },
+            large    => { spawn_cap => 20, turn_cap => 0 },
         },
         gates => { format => '', typecheck => '', test_affected => '', test => '', install => '', timeout => 300 },
         git => { localWrites => 'per-goal' },

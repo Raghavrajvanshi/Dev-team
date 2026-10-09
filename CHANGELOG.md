@@ -2,6 +2,22 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.0] - 2026-10-10
+Quality and currency. A first end-to-end project passed every check and still looked like a wireframe: all criteria were structural, nothing researched what current work looks like, nobody looked at the result, and the size budget acted as a ceiling.
+### Added
+- **Research Analyst** (`researcher`): establishes what is current (verified versions, idioms, how leading examples are built) and writes a cited `reference.md`; topics cached in `.devteam/knowledge/` for 30 days (`dt knowledge [--stale DAYS]`).
+- **UX Designer** (`ux-designer`): writes a design spec (art direction, tokens, layout, real content, imagery plan, motion, states) and critiques screenshots against a rubric.
+- `dt shot [--serve DIR] [--widths 390,768,1280]`: headless-Chrome screenshots into the goal's evidence, so agents look at what they built.
+- Skills `research` and `design-quality` (principles and the scoring rubric); the Architect, designer and researcher can use `WebSearch`/`WebFetch`, engineers `WebFetch`.
+- Intake adds a **quality criterion** for user-facing goals and asks for 1-3 live references.
+### Changed
+- The PM flow: research, design spec, build with self-review of screenshots, QA screenshots, designer critique and up to two polish rounds, then code and product-quality review. Quality is never traded for spawns.
+- Every agent has an explicit "how you think" process; the craft charter now says minimal means no waste, not low ambition, and the Architect's complexity budget is sized from the quality bar.
+- Defaults: engineers and reviewer at high effort, verifier medium, lane caps standard 7 and large 20.
+- The reviewer scores product quality from screenshots as a second lens; the verifier judges rubric criteria only from opened screenshots.
+- Always-on footprint rose from about 441 to about 596 tokens per session (measured with `claude plugin details`); hooks still cost none.
+- Subagents may write `reference.md`, `design-spec.md`, `knowledge/` and `evidence/shots/` (still not state or criteria).
+
 ## [0.1.5] - 2026-10-10
 ### Changed
 - Team names are now generated at runtime instead of being fixed: each role's name is drawn at random from `names.txt` when the team is first needed, kept for the engagement, never repeated within a team, and dropped when the team is stood down. Titles and role ids stay fixed. This replaces the fixed names shipped in 0.1.4.

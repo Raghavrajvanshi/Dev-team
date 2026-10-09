@@ -8,7 +8,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (235) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (280) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.5  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.0  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -108,8 +108,21 @@ Every role is a person with a title. **Names are drawn at random when the team i
 | QA Engineer | `qa-engineer` | agent |
 | Staff Engineer (code review) | `reviewer` | agent |
 | Acceptance Verifier | `goal-verifier` | agent |
+| Research Analyst | `researcher` | agent |
+| UX Designer | `ux-designer` | agent |
 
-Planned: Backend, Frontend, Mobile, DevOps, Security, UX, Technical Writer and Research roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
+Planned: Backend, Frontend, Mobile, DevOps, Security and Technical Writer roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
+
+### How the team thinks
+
+Passing checks is not the same as good work, so the process is built around quality, not just completion:
+
+1. **Research first, never from memory.** The Research Analyst establishes what is current (verified versions, current idioms, how leading examples in the domain are built) and writes a cited `reference.md`; topics are cached in `.devteam/knowledge/` for 30 days. The Architect and designers can search and fetch the web too, and engineers can confirm an API in the docs.
+2. **Design before building** for anything user-facing: the UX Designer writes a design spec (art direction, tokens, layout, real content, imagery plan, motion, states) from the reference and any live examples you give.
+3. **Look at the result.** `dt shot` takes headless-Chrome screenshots at 390, 768 and 1280. Engineers review their own screenshots, QA captures every page, and the Designer scores them against a rubric (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity).
+4. **Polish until it passes.** Anything under 4 of 5 goes back to an engineer with concrete fixes, for up to two rounds; if it still fails you see the scores and screenshots.
+5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
+6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
 
 ### Lanes and lifecycles
 
@@ -123,7 +136,7 @@ Planned: Backend, Frontend, Mobile, DevOps, Security, UX, Technical Writer and R
 
 ## Cost
 
-`claude plugin details devteam` reports the plugin's footprint: about **441 tokens added to every session**; hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1k, `orchestrate` about 1.2k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
+`claude plugin details devteam` reports the plugin's footprint: about **600 tokens added to every session**; hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.2k, `orchestrate` about 1.6k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
 
 ## Troubleshooting
 
@@ -148,7 +161,7 @@ Planned: Backend, Frontend, Mobile, DevOps, Security, UX, Technical Writer and R
 ## Develop
 
 ```bash
-prove tests/                                        # 235 tests
+prove tests/                                        # 280 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict
