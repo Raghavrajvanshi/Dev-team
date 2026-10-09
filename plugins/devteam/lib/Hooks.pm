@@ -95,7 +95,7 @@ sub state_protect {
     }
     (my $rel = $f) =~ s{^\Q$root\E/(?:\.claude/worktrees/[^/]+/)?}{} or return;
     my $g = goal_dir() or return;
-    my $c = DT::jread("$g/criteria.json") or return;
+    my $c = jread("$g/criteria.json") or return;
     deny("$rel is a locked acceptance test; only devteam:qa-engineer may change it")
       if exists $c->{locks}{$rel} && ($in->{agent_type} // '') ne 'devteam:qa-engineer';
 }

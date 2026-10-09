@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 
 ## Status: v0.1 (core loop), under active development
 
-**Tested** (`prove tests/`, 179 tests, no dependencies beyond Perl 5 core): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook.
+**Tested** (`prove tests/`, 186 tests, no dependencies beyond Perl 5 core): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook.
 
 **Not yet verified live** inside a running Claude Code session (the plugin was built without API access to the CLI): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, `${CLAUDE_SESSION_ID}` substitution in skills, `skills:` preload of a plugin skill by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`). Every one has a documented fallback; please report what you see.
 

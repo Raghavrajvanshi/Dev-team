@@ -158,7 +158,8 @@ sub tree_key {
     my ($cwd) = @_;
     my $c = Digest::SHA->new(256);
     $c->add(git_out($cwd, 'rev-parse', 'HEAD^{tree}'), "\0", git_out($cwd, 'diff', 'HEAD', '--', '.', ':!.devteam'));
-    for my $f (sort split /\0/, do { local $/; my $o = git_out($cwd, 'ls-files', '-o', '--exclude-standard', '-z', '--', '.', ':!.devteam'); $o }) {
+    my $untracked = git_out($cwd, 'ls-files', '-o', '--exclude-standard', '-z', '--', '.', ':!.devteam');
+    for my $f (sort split /\0/, $untracked) {
         $c->add("\0$f\0");
         if (open my $h, '<:raw', "$cwd/$f") { $c->addfile($h); close $h }
     }
