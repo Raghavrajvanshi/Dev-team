@@ -37,7 +37,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.1.2  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.3  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -138,6 +138,14 @@ claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict
 claude plugin validate plugins/devteam/agents --strict
 ```
+
+### Releasing
+
+Every published change is a new version and a GitHub release ([releases](https://github.com/Raghavrajvanshi/Dev-team/releases), [CHANGELOG](CHANGELOG.md)):
+
+1. Bump `version` in `plugins/devteam/.claude-plugin/plugin.json` and add a `## [x.y.z]` entry to `CHANGELOG.md`.
+2. Commit and push to `main`.
+3. Run `scripts/release`. It refuses unless the commit is on `origin/main`, the version is new and has a changelog entry, and the tree is clean, `prove tests/` passes and `claude plugin validate --strict` is clean. The release notes are the changelog entry plus the commit, test count and install/update commands.
 
 Layout: `plugins/devteam/{bin/dt, lib/, hooks/, skills/, agents/, lifecycles/, templates/}`. The full design and the reasoning behind it: [docs/DESIGN.md](docs/DESIGN.md).
 

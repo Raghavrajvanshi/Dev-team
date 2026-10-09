@@ -1,0 +1,78 @@
+#!/bin/sh
+# Create a GitHub release for the version in plugins/devteam/.claude-plugin/plugin.json.
+# The commit must already be on origin/main and CHANGELOG.md must have an entry for the version.
+# usage: scripts/release [--commit SHA] [--no-latest] [--dry-run]
+set -eu
+cd "$(dirname "$0")/.."
+
+commit=HEAD latest=true dry=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --commit) commit=$2; shift ;;
+    --no-latest) latest=false ;;
+    --dry-run) dry=true ;;
+    *) echo "usage: scripts/release [--commit SHA] [--no-latest] [--dry-run]" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+die() { echo "release: $*" >&2; exit 1; }
+ghgit() { git -c credential.helper= -c 'credential.helper=!gh auth git-credential' "$@"; }
+
+ghgit fetch -q origin main --tags || die "cannot fetch origin"
+sha=$(git rev-parse --verify "$commit^{commit}") || die "unknown commit $commit"
+short=$(git rev-parse --short "$sha")
+git merge-base --is-ancestor "$sha" origin/main || die "$short is not on origin/main: push it first"
+
+version=$(git show "$sha:plugins/devteam/.claude-plugin/plugin.json" |
+  perl -MJSON::PP -e 'local $/; print decode_json(<STDIN>)->{version}')
+[ -n "$version" ] || die "no version in plugin.json at $short"
+tag="v$version"
+git rev-parse -q --verify "refs/tags/$tag" >/dev/null && die "$tag already exists: bump the version and add a CHANGELOG entry"
+gh release view "$tag" >/dev/null 2>&1 && die "release $tag already exists"
+
+notes=$(awk -v v="$version" '
+  /^## \[/ { if (on) exit; on = index($0, "## [" v "]") == 1; next }
+  on { print }' CHANGELOG.md)
+[ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ] || die "CHANGELOG.md has no entry for $version"
+
+verification="Not re-run: this release was created after the fact from commit \`$short\`."
+if [ "$sha" = "$(git rev-parse HEAD)" ]; then
+  [ -z "$(git status --porcelain)" ] || die "working tree is not clean"
+  out=$(prove tests/ 2>&1) || { printf '%s\n' "$out" | tail -15 >&2; die "tests failed"; }
+  tests=$(printf '%s\n' "$out" | sed -n 's/.*Tests=\([0-9][0-9]*\).*/\1/p')
+  for t in . plugins/devteam; do
+    claude plugin validate "$t" --strict >/dev/null 2>&1 || die "claude plugin validate --strict failed for $t"
+  done
+  for t in plugins/devteam/skills plugins/devteam/agents; do
+    claude plugin validate "$t" --strict >/dev/null 2>&1 || die "claude plugin validate --strict failed for $t"
+  done
+  verification="$tests tests passing; \`claude plugin validate --strict\` clean for the marketplace, plugin, skills and agents."
+fi
+
+slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+prev=$( { git tag --list 'v*'; echo "$tag"; } | sort -V | awk -v t="$tag" '$0 == t { print p; exit } { p = $0 }')
+if [ -n "$prev" ]; then
+  changes="https://github.com/$slug/compare/$prev...$tag"
+else
+  changes="https://github.com/$slug/commits/$tag"
+fi
+
+body=$(mktemp)
+trap 'rm -f "$body"' EXIT
+{
+  printf '%s\n' "$notes"
+  printf '\n### Verification\n- Commit: `%s`\n- %s\n' "$short" "$verification"
+  printf '\n### Install or update\n```bash\n'
+  printf 'claude plugin marketplace add Raghavrajvanshi/Dev-team   # first time only\n'
+  printf 'claude plugin install devteam@devteam-marketplace        # first time only\n'
+  printf 'claude plugin marketplace update devteam-marketplace\n'
+  printf 'claude plugin update devteam@devteam-marketplace         # then restart Claude Code\n'
+  printf '```\n\nFull changelog: %s\n' "$changes"
+} > "$body"
+
+if $dry; then echo "== $tag at $short (latest=$latest) =="; cat "$body"; exit 0; fi
+
+if [ "$latest" = true ]; then flag=--latest; else flag=--latest=false; fi
+gh release create "$tag" --target "$sha" --title "devteam $tag" --notes-file "$body" "$flag"
+ghgit fetch -q --tags origin
