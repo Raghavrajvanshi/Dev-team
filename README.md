@@ -1,76 +1,144 @@
 # Dev-team
 
-A goal-gated, token-lean software development team for Claude Code, packaged as the plugin `devteam`. It works in any git project.
+A goal-gated, token-lean software development team for Claude Code, packaged as the plugin **`devteam`**. It works in any git project.
 
 - A **Goal Keeper** asks you to define the goal first. Nothing is built until you confirm it, and the team stops when the done-criteria are verified by script.
-- A **PM**, an **Architect**, engineers, **QA** and a **Reviewer** are spawned one at a time, only when a step needs them.
+- A **PM**, an **Architect**, engineers, **QA** and a **Reviewer** are started one at a time, only when a step needs them.
 - The PM suggests the best-fit **lifecycle** (Agile Scrum/Kanban, Waterfall, and more) and you choose.
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
-- Code quality is enforced, not requested: a short craft charter (minimal, modular, no slop) is preloaded by every agent, and scope, tests and a close gate are checked by scripts.
+- Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-## Status: v0.1 (core loop), under active development
-
-**Tested** (`prove tests/`, 186 tests, no dependencies beyond Perl 5 core): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook.
-
-**Not yet verified live** inside a running Claude Code session (the plugin was built without API access to the CLI): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, `${CLAUDE_SESSION_ID}` substitution in skills, `skills:` preload of a plugin skill by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`). Every one has a documented fallback; please report what you see.
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (186) and the plugin installs cleanly from this repo, but it has not yet been exercised end to end inside a live Claude Code session. See [Status and known limits](#status-and-known-limits).
 
 ## Requirements
 
-Claude Code 2.1.295 or newer, `git`, and Perl 5 (macOS/Linux; Windows is not supported yet).
+| Needed | Check with | Notes |
+|---|---|---|
+| Claude Code **2.1.295 or newer** | `claude --version` | Older versions lack the hook failure setting the plugin relies on. Update with `claude update`. |
+| `git` | `git --version` | The project must be a git repo with at least one commit. |
+| Perl 5 with core modules | `perl -MJSON::PP -MDigest::SHA -e1` (prints nothing when fine) | Preinstalled on macOS and most Linux. Windows is not supported yet. |
 
 ## Install
+
+Run these two commands in a terminal:
+
+```bash
+claude plugin marketplace add Raghavrajvanshi/Dev-team
+claude plugin install devteam@devteam-marketplace
+```
+
+Or, from inside a Claude Code session:
 
 ```
 /plugin marketplace add Raghavrajvanshi/Dev-team
 /plugin install devteam@devteam-marketplace
 ```
 
-## Use
+Then restart Claude Code (or run `/reload-plugins`) and check it:
 
-1. `/devteam:start` once per project: preflight, a one-time model choice (recommended models are pre-selected), a cheap project scan, and an offer to add an allow-list so the team does not stop at every command.
-2. Describe a goal. The Goal Keeper asks a few questions (the Architect adds up to three technical ones), then shows one combined confirmation: the contract and done-criteria, the lane, the lifecycle, and the git permissions.
-3. The team works. You are asked again only for exceptions and once at close-out (open manual criteria, commit, PR).
-4. When every criterion is verified, the goal closes and nothing keeps running. Your next message starts a new goal.
+```bash
+claude plugin list        # devteam@devteam-marketplace  Version 0.1.0  enabled
+```
 
-| Command | What it does |
+In a session, typing `/devteam:` should list the commands below.
+
+By default the plugin installs for you (`--scope user`) and is available in every project, but it stays **idle until you run `/devteam:start`** in a project. Use `--scope project` to enable it for everyone on one repository.
+
+**Try it without installing:**
+
+```bash
+git clone https://github.com/Raghavrajvanshi/Dev-team.git
+cd your-project && claude --plugin-dir ../Dev-team/plugins/devteam
+```
+
+**Update, disable, uninstall:**
+
+```bash
+claude plugin marketplace update devteam-marketplace
+claude plugin update devteam@devteam-marketplace     # restart Claude Code to apply
+claude plugin disable devteam@devteam-marketplace    # switches every hook off
+claude plugin uninstall devteam@devteam-marketplace
+```
+
+## Use it
+
+Open Claude Code in your project and follow these steps.
+
+**1. Start the team: `/devteam:start`** (once per project)
+It checks your setup (Claude Code version, git repo with a commit, clean working tree) and offers a fix for anything missing, never applying it without your yes. The first time, it asks **one question: use the recommended models, or customise?** (recommended is pre-selected). It then scans the project cheaply into `.devteam/profile.md`, records the project's test and lint commands, and offers an allow-list so the team does not stop at every command. You approve each of these.
+
+**2. Describe a goal in plain words**
+For example: *"Add a /health endpoint that returns {status: ok}, with a test."* (or `/devteam:goal <text>`). The Goal Keeper asks only what it cannot infer (the Architect adds up to three technical questions), each with a recommended answer, so "go with your recommendations" works. Then you get **one combined confirmation**:
+
+| You confirm | Examples |
 |---|---|
-| `/devteam:start` | Engage the team; resume a paused or blocked goal |
-| `/devteam:goal [text]` | Define and confirm a goal |
-| `/devteam:amend <change>` | Change criteria, scope, lane, lifecycle, git permissions |
-| `/devteam:status` | State, board, criteria, usage |
-| `/devteam:pause`, `/devteam:stop` | Pause, or stop and clean up |
+| The contract | Objective, scope, non-goals, and done-criteria like *WHEN GET /health THEN 200 and `{"status":"ok"}`* |
+| The lane | *tiny* (inline, no agents), *standard*, or *large* |
+| The lifecycle | The PM's suggestion with its reasons, the runner-up, "show all", or type any name |
+| Git permissions | Whether the team may create `devteam/<goal>`, commit on it, merge into it, and switch back |
+
+**3. The team works.** You see short summaries. You are asked again only for **exceptions** (a cap is reached, tests keep failing, a command is not allow-listed, anything that would push or deploy) and **once at close-out**: open manual criteria, whether to commit, and whether to open a PR (the exact commands are shown).
+
+**4. It stops.** When every criterion is verified by script, the goal closes with a short report in `.devteam/goals/<id>/closure.md`, your original branch is restored, and nothing keeps running. Your next message starts a new goal.
+
+### Commands
+
+| Command | Use it to |
+|---|---|
+| `/devteam:start` | Engage the team in this project; resume a paused or blocked goal |
+| `/devteam:goal [text]` | Define and confirm a new goal (a plain message does this too once engaged) |
+| `/devteam:amend <change>` | Change criteria, scope, lane, lifecycle or git permissions mid-goal |
+| `/devteam:status` | See state, board, criteria, spawns and usage |
+| `/devteam:pause` | Pause (a running agent finishes its step; nothing new starts) |
+| `/devteam:stop` | Stop now, clean up and disengage |
 | `/devteam:changemodels` | Pick team members, then set their model and effort |
 | `/devteam:lifecycle [name]` | Show or change the process lifecycle |
-| `/devteam:ask <role> <q>` | One-off consult with a role |
+| `/devteam:ask <role> <question>` | One-off consult with a role (read-only) |
 
-## The team (v0.1)
+### Lanes and lifecycles
 
-`architect` (opus) · `fullstack-engineer`, `qa-engineer`, `reviewer`, `goal-verifier` (sonnet) · the PM and Goal Keeper intake run in your session as skills. Models and effort are recommended defaults you can change. Backend/frontend/mobile/DevOps/Security/UX/Writer roles, parallel worktrees and more lifecycles (DevOps, V-model, Spiral, Prototype) are planned.
+- **Lane** is how big the work is: *tiny* (one file or a small fix, **zero agents**), *standard* (a feature in existing code), *large* (several modules). Each lane caps how many agents may start.
+- **Lifecycle** is the process shape, chosen by you from the PM's suggestion: `direct`, `agile-kanban`, `agile-scrum`, `waterfall` today. Each is a short file in [`plugins/devteam/lifecycles/`](plugins/devteam/lifecycles); add your own in `.devteam/lifecycles/<name>.md`, starting from `_template.md`.
 
-Lanes decide who runs: **tiny** (no agents, you and the PM inline), **standard**, **large**. Lifecycles decide the process shape and are small data files in `plugins/devteam/lifecycles/`; add your own in `.devteam/lifecycles/`.
+### What it creates in your project
 
-## How it stays cheap and safe
+- `.devteam/` (it offers to add this to `.gitignore`): state, config, `profile.md`, `standards.md`, and `goals/G-001/{goal.md, criteria.json, board.md, closure.md}`. Safe to read, and you may edit `goal.md` freely. Changes to `criteria.json`, `state.json` or `config.json` made outside the team's tools are detected and block the goal; ask Claude to run `dt resync` to accept a deliberate edit.
+- A git branch `devteam/G-001`, only if you grant it. Your own branch is restored at the end and its tip is verified unchanged.
 
-- Cold by default: no agent starts before a confirmed goal, one at a time, within a per-lane spawn cap.
-- Handoffs are short briefs and replies of at most 150 words; gate results are cached by git tree hash so an identical tree is never tested twice.
-- Hooks do nothing, and start nothing, unless this session engaged the team (`.devteam/state.json`). To switch everything off, disable the plugin.
-- Subagents cannot write team state or locked acceptance tests, and git is tiered: read (open), local writes (need your per-goal grant, only the right roles, never on your own branch), push/PR/deploy/destructive (always asked). Hooks are defence in depth; add the proposed `permissions.ask` rules for a hard prompt.
+## Cost
+
+`claude plugin details devteam` reports the plugin's footprint: about **441 tokens added to every session**; hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1k, `orchestrate` about 1.2k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
+
+## Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| Preflight says `FAIL claude-version` | `claude update`, then restart |
+| `FAIL git` or `FAIL clean-tree` | Make an initial commit; commit or stash your changes, then rerun `/devteam:start` |
+| `dt: command not found` | Restart Claude Code or `/reload-plugins`. If it persists, tell Claude to run `dt` by its full path inside the installed plugin folder (`claude plugin list` shows where), and report it |
+| Start says the session id was not substituted | This build does not expose it to skills; open an issue with your Claude Code version |
+| Goal is `BLOCKED` | `/devteam:status` shows why. Resolve it and run `/devteam:start` to resume, or `/devteam:stop` |
+| The team is in the way of normal work | `/devteam:stop`, or `claude plugin disable devteam@devteam-marketplace` |
+
+## Status and known limits
+
+**Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
+
+**Not yet verified inside a live session** (each has a documented fallback; please report what you see): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, the plugin `bin/` directory joining PATH (so `dt` resolves), `${CLAUDE_SESSION_ID}` in skills, preloading the `craft` skill into agents by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`).
+
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Security/UX/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. macOS and Linux only.
 
 ## Develop
 
-```
-prove tests/                              # unit and CLI tests
-claude plugin validate plugins/devteam    # manifest
+```bash
+prove tests/                                        # 186 tests
+claude plugin validate .                            # marketplace
+claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict
 claude plugin validate plugins/devteam/agents --strict
-claude --plugin-dir ./plugins/devteam     # try it in a project
 ```
 
-Layout: `plugins/devteam/{bin/dt, lib/, hooks/, skills/, agents/, lifecycles/, templates/}`.
-
-## Design
-
-The full design and the reasoning behind it: [docs/DESIGN.md](docs/DESIGN.md).
+Layout: `plugins/devteam/{bin/dt, lib/, hooks/, skills/, agents/, lifecycles/, templates/}`. The full design and the reasoning behind it: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 
