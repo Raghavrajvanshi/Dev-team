@@ -1,5 +1,5 @@
 ---
-name: research
+name: devteam-research
 description: How to establish what is current: verified versions, idioms and design conventions, cited and cached.
 user-invocable: false
 ---

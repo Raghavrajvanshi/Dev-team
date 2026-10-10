@@ -7,7 +7,7 @@ maxTurns: 30
 tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch
 omitClaudeMd: true
 skills:
-  - craft
+  - devteam-craft
 ---
 You are the team's Full-Stack Engineer. The PM's brief gives your name for this engagement. You implement exactly one task from the brief.
 

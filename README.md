@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (317) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (337) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -56,7 +56,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.2.3  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.4  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -139,7 +139,7 @@ Passing checks is not the same as good work, so the process is built around qual
 
 1. **Research first, never from memory.** The Research Analyst establishes what is current (verified versions, current idioms, how leading examples in the domain are built) and writes a cited `reference.md`; topics are cached in `.devteam/knowledge/` for 30 days. The Architect and designers can search and fetch the web too, and engineers can confirm an API in the docs.
 2. **Design before building** for anything user-facing: the UX Designer writes a design spec (art direction, tokens, layout, real content, imagery plan, motion, states) from the reference and any live examples you give.
-3. **Look at the result.** `dt shot` takes headless-Chrome screenshots at 390, 768 and 1317. Engineers review their own screenshots, QA captures every page, and the Designer scores them against a rubric (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity).
+3. **Look at the result.** `dt shot` takes headless-Chrome screenshots at 390, 768 and 1337. Engineers review their own screenshots, QA captures every page, and the Designer scores them against a rubric (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity).
 4. **Polish until it passes.** Anything under 4 of 5 goes back to an engineer with concrete fixes, for up to two rounds; if it still fails you see the scores and screenshots.
 5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
@@ -186,14 +186,18 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in a first live run:** the plugin loads from the marketplace, `/devteam:start` runs, preflight, `dt init` and `dt engage ${CLAUDE_SESSION_ID}` work, and `dt` resolves. Live runs also found and fixed four bugs: `changemodels` was user-only so `start` could not use it, `.gitignore` edits left the tree dirty (now `.git/info/exclude`), the first commit could sweep in `.DS_Store` and `.claude/` (now it shows the file list and asks), and `/devteam:goal` ran before setup was finished (it now completes setup first via the `setup` skill).
 
-**Not yet verified inside a live session** (each has a documented fallback; please report what you see): the exact `Agent` tool input fields, `agent_id`/`agent_type` on subagent hook calls, preloading the `craft` skill into agents by bare name, the `model`/`effort` override on spawn, `SubagentStop` blocking from a plugin, and PM mode (`claude --agent devteam:project-manager`).
+**Confirmed in live sessions** (the first real run, and `/devteam:selftest`, 10 October 2026): the plugin loads from the marketplace; `dt` resolves from the plugin's `bin/`; the `Agent` tool input carries `subagent_type`, `model`, `effort` and `isolation`; `agent_id` and `agent_type` (`devteam:<role>`) reach hooks on subagent calls; subagent writes to protected state and subagent pushes and commits are denied; the spawn guard refuses an untyped agent and a worktree spawn without a grant; the `model` passed on spawn is the model the agent runs as; `craft` and `design-quality` preload into agents; subagent token usage reaches the ledger.
+
+**Found and fixed by the self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
+
+**Still unverified live:** PM mode (`claude --agent devteam:project-manager`), the finish gate actually blocking a `SubagentStop`, and the v0.2 flow end to end on a real user-facing goal (researcher, designer, screenshots, polish loop).
 
 **v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Security/UX/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 317 tests
+prove tests/                                        # 337 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

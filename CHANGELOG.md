@@ -2,6 +2,14 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.4] - 2026-10-10
+First results from `/devteam:selftest` (gap G1): nine checks confirmed, one defect found and fixed.
+### Fixed
+- A bare skill name can resolve to another installed plugin's skill: the researcher's preloaded `research` skill loaded a different plugin's text. The preloaded skills are renamed `devteam-craft`, `devteam-research` and `devteam-design-quality`, and a test fails if an agent preloads anything without the `devteam-` prefix.
+- PM mode no longer preloads `orchestrate` and `goal` by bare name; it invokes `devteam:orchestrate` and `devteam:goal` through the Skill tool.
+### Confirmed live
+- `dt` on PATH; `Agent` input fields (`subagent_type`, `model`, `effort`, `isolation`); `agent_id` and `devteam:`-prefixed `agent_type` on subagent hook calls; live denial of subagent state writes, pushes and commits; spawn guard refusing an untyped agent and an ungranted worktree; model override; subagent token usage in the ledger.
+
 ## [0.2.3] - 2026-10-10
 Live verification (gap G1): a way to settle what Claude Code really does, from a real run.
 ### Added

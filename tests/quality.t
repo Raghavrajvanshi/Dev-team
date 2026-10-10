@@ -39,11 +39,11 @@ like($orch, qr/Quality is never traded for spawns/, 'and quality is not traded f
 my $goal = slurp("$PLUGIN/skills/goal/SKILL.md");
 like($goal, qr/Structural criteria are necessary, not sufficient/, 'intake requires a quality criterion for user-facing goals');
 like($goal, qr/1-3 live references/, 'and asks for live references');
-like(slurp("$PLUGIN/skills/craft/SKILL.md"), qr/Minimal means no waste, not low ambition/, 'the craft charter no longer pushes quality down');
+like(slurp("$PLUGIN/skills/devteam-craft/SKILL.md"), qr/Minimal means no waste, not low ambition/, 'the craft charter no longer pushes quality down');
 like(slurp("$PLUGIN/agents/architect.md"), qr/never a reason to cut design fidelity/, 'the complexity budget is not a ceiling on quality');
 like(slurp("$PLUGIN/agents/goal-verifier.md"), qr/open the screenshots.*with Read/s, 'the verifier judges quality from screenshots');
-like(slurp("$PLUGIN/skills/design-quality/SKILL.md"), qr/Flat clip-art boxes are a defect/, 'the design-quality skill names the failure we saw');
-like(slurp("$PLUGIN/skills/research/SKILL.md"), qr/Never build from memory|never build from memory/i, 'the research skill forbids working from memory');
+like(slurp("$PLUGIN/skills/devteam-design-quality/SKILL.md"), qr/Flat clip-art boxes are a defect/, 'the devteam-design-quality skill names the failure we saw');
+like(slurp("$PLUGIN/skills/devteam-research/SKILL.md"), qr/Never build from memory|never build from memory/i, 'the devteam-research skill forbids working from memory');
 
 # --- cached knowledge ---
 my ($rc, $out) = dt('knowledge');
@@ -89,6 +89,20 @@ like(slurp($paths[1]), qr/PNG 1280,2400/, 'the requested window size reached the
     for my $id (grep { $_ ne 'pm-mode' } @ids) { like($skill, qr/\b\Q$id\E\b/, "selftest records $id") }
     like($skill, qr/dt trace note pm-mode/, 'selftest says how to record the PM mode check');
     like($skill, qr/^disable-model-invocation: true$/m, 'selftest is user-only: it spawns agents');
+}
+
+# --- preloaded skills need collision-proof names that match their folders (a bare name once resolved to another plugin's skill) ---
+{
+    for my $a (glob "$PLUGIN/agents/*.md") {
+        my ($fm) = slurp($a) =~ /\A---\n(.*?)\n---/s;
+        my ($list) = $fm =~ /^skills:\n((?:  - \S+\n?)+)/m;
+        for my $n (($list // '') =~ /^  - (\S+)$/mg) {
+            like($n, qr/^devteam-/, "$a preloads '$n' by a devteam- prefixed name");
+            like(slurp("$PLUGIN/skills/$n/SKILL.md"), qr/^name: \Q$n\E$/m, "'$n' is a real skill whose name matches its folder");
+        }
+    }
+    unlike(slurp("$PLUGIN/agents/project-manager.md"), qr/^skills:/m, 'PM mode preloads nothing by a bare name');
+    like(slurp("$PLUGIN/agents/project-manager.md"), qr/`devteam:orchestrate`/, 'and names orchestrate by its qualified name');
 }
 
 done_testing;

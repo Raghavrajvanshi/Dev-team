@@ -1,5 +1,5 @@
 ---
-name: craft
+name: devteam-craft
 description: Craft charter for devteam agents: minimal, modular, no-slop code rules.
 user-invocable: false
 ---

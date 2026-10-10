@@ -1,5 +1,5 @@
 ---
-name: design-quality
+name: devteam-design-quality
 description: What good product design looks like now, and the rubric used to judge UI work from screenshots.
 user-invocable: false
 ---
