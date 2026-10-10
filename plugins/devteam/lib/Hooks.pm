@@ -7,6 +7,7 @@ use JSON::PP;
 use DT qw(root ddir slurp spit jread ts ledger_add state_read state_write update_state config_read check_seal seal
   goal_dir git_out run_gates usage_since locked);
 use DT::Git qw(classify segments);
+use DT::Sessions qw(live_others note_other lease_touch acked);
 use Text::ParseWords qw(shellwords);
 use Exporter 'import';
 our @EXPORT_OK = qw(dispatch);
@@ -56,7 +57,17 @@ sub dispatch {
     ($TRACE, $CUR) = (trace_on(), $name);
     trace({ event => $in->{hook_event_name}, agent => $agent, owned => $owned, status => $st->{status}, input => shrink($in) });
     # Main-thread events belong to the owning session only; subagent calls always belong to the engaged team.
-    return if !$agent && !$owned;
+    if (!$agent && !$owned) {
+        # Another session in this repo: remember it (and the file it is about to write), never govern it.
+        # Only the guard goes on, to refuse devteam agents that this session does not own.
+        if ($name =~ /^(?:guard|state-protect|git-guard|route)$/) {
+            my $ti = ref $in->{tool_input} eq 'HASH' ? $in->{tool_input} : {};
+            my $f = $name eq 'state-protect' ? ($ti->{file_path} // $ti->{notebook_path}) : undef;
+            note_other($in->{session_id}, $f);
+        }
+        return unless $name eq 'guard';
+    }
+    lease_touch() if $owned;
     $st = tamper($st);
     $h->($in, $st, $agent);
     trace({ decision => 'none' });
@@ -79,6 +90,10 @@ sub guard {
     my ($in, $st, $agent) = @_;
     my $ti = $in->{tool_input} // {};
     my ($type, $iso) = ($ti->{subagent_type} // '', $ti->{isolation} // '');
+    if (!$agent && ($st->{owner_session} // '') ne ($in->{session_id} // '')) {
+        deny('the team is held by another session (' . substr($st->{owner_session} // '', 0, 8) . "); run /devteam:start here to take it over (it asks first when that session is still active)") if $type =~ /^devteam:/;
+        return;
+    }
     deny("agents may not start other agents (asked for '$type')") if $agent;
     locked(sub {
         my $s = state_read();
@@ -92,6 +107,12 @@ sub guard {
               unless $type =~ /^devteam:/ || $type eq 'Explore';
             return unless $type =~ /^devteam:/;
             deny('only devteam:goal-verifier may run while the goal is VERIFYING') if $stat eq 'VERIFYING' && $type ne 'devteam:goal-verifier';
+            my %ok = acked($s->{goal});
+            if (my @new = grep { !$ok{ $_->{id} } } live_others($s->{owner_session})) {
+                deny('another Claude session is active in this repository and can edit the same files: '
+                    . join('; ', map { substr($_->{id}, 0, 8) . ($_->{name} ? " \"$_->{name}\"" : '') . ', ' . ($_->{busy} ? 'busy' : "active $_->{age}s ago") } @new)
+                    . '. Ask the user to choose: continue alongside it (dt sessions ack), work in a separate worktree, or stop the other session first. Then retry the spawn.');
+            }
             deny("spawn cap reached ($s->{spawns}/$s->{spawn_cap} for the $s->{lane} lane); ask the user before spawning more") if $s->{spawns} >= $s->{spawn_cap};
             deny("worktree isolation needs the 'task_branches' git grant") if $iso eq 'worktree' && !$s->{git_grants}{task_branches};
             $s->{spawns}++;

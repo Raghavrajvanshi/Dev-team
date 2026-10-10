@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (436) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (540) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -165,6 +165,16 @@ Passing checks is not the same as good work, so the process is built around qual
 - `.devteam/` (it offers to hide it from `git status` through `.git/info/exclude`; your tracked `.gitignore` is never touched): state, config, `profile.md`, `standards.md`, and `goals/G-001/{goal.md, criteria.json, board.md, closure.md}`. Safe to read, and you may edit `goal.md` freely. Changes to `criteria.json`, `state.json` or `config.json` made outside the team's tools are detected and block the goal; ask Claude to run `dt resync` to accept a deliberate edit.
 - A git branch `devteam/G-001`, only if you grant it. Your own branch is restored at the end and its tip is verified unchanged.
 
+### Several Claude sessions in one repository
+
+Two sessions editing the same working tree can overwrite each other, and the team's acceptance tests are the first thing to suffer. The strongest fix is the one Claude Code documents: give each parallel session its own worktree (`claude --worktree <name>`), so their files are separate. When sessions do share a tree, the team notices and asks instead of carrying on:
+
+- **At `/devteam:start`:** if another live session shares this working tree, or another session still holds the team, you are asked to choose (continue alongside it, work in a separate worktree, take the team over, or stop). Nothing changes until you choose.
+- **Before each spawn:** a live session you have not acknowledged for this goal blocks the spawn until you answer once.
+- **After each task:** the PM records the task's allowed files (`dt scope start`) and checks the tree afterwards (`dt scope check`). Anything changed outside them is listed, with the other session's name when the hooks saw it write. You keep it or remove it; a goal will not close while any of it is unresolved.
+
+`dt sessions` shows what the team can see. Liveness comes from Claude Code's session registry (`~/.claude/sessions`, an undocumented format seen on 2.1.295) and is used only when it lists the asking session itself; otherwise it falls back to recent transcripts and to what the hooks observed. A session counts as live when it is busy or was active within 30 minutes (`sessions.live_secs` in `.devteam/config.json`). This detects and warns; it cannot prevent a write, and other editors and tools are invisible to it.
+
 ## Cost
 
 `claude plugin details devteam` reports the plugin's footprint: about **600 tokens added to every session**; hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.2k, `orchestrate` about 1.6k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
@@ -193,7 +203,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 ## Status and known limits
 
-**Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate and its four outcomes, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
+**Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate and its four outcomes, lifecycle selector, model/effort settings, git grants, session detection and scope checks), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
 
 **Confirmed in a first live run:** the plugin loads from the marketplace, `/devteam:start` runs, preflight, `dt init` and `dt engage ${CLAUDE_SESSION_ID}` work, and `dt` resolves. Live runs also found and fixed four bugs: `changemodels` was user-only so `start` could not use it, `.gitignore` edits left the tree dirty (now `.git/info/exclude`), the first commit could sweep in `.DS_Store` and `.claude/` (now it shows the file list and asks), and `/devteam:goal` ran before setup was finished (it now completes setup first via the `setup` skill).
 
@@ -208,7 +218,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 436 tests
+prove tests/                                        # 540 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

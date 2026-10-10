@@ -115,4 +115,16 @@ like(slurp($paths[1]), qr/PNG 1280,2400/, 'the requested window size reached the
     like(slurp("$PLUGIN/skills/stop/SKILL.md"), qr/outcome/, 'stop reports the recorded outcome');
 }
 
+# --- concurrent sessions: the PM flow must keep using what dt provides ---
+{
+    my $o = slurp("$PLUGIN/skills/orchestrate/SKILL.md");
+    like($o, qr/dt scope start <task-id>/, 'orchestrate sets the task scope before spawning');
+    like($o, qr/dt scope check/, 'orchestrate checks the scope after each task');
+    like($o, qr/dt sessions ack/, 'orchestrate handles a refused spawn with the user\'s choice');
+    like($o, qr/Never accept to silence it/, 'orchestrate forbids accepting out-of-scope writes to silence them');
+    like(slurp("$PLUGIN/skills/start/SKILL.md"), qr/ENGAGE NEEDS A CHOICE.*--take-over.*--accept-others/s, 'start handles a choice from dt engage');
+    my $dt = slurp("$PLUGIN/bin/dt");
+    like($dt, qr/'sessions-registry'/, 'the registry check is a recorded manual check');
+}
+
 done_testing;

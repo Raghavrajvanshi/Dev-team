@@ -2,6 +2,18 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.6] - 2026-10-10
+Concurrent sessions (gap G16): another Claude session in the same repository no longer goes unnoticed.
+### Added
+- `dt sessions` (list, `ack`, `check`, `probe`): other live sessions that share this working tree. Liveness comes from Claude Code's session registry, trusted only when it lists the asking session; otherwise recent transcripts and what the hooks observed.
+- A lease on the team (`.devteam/session.lock`, heartbeat from the owner's hooks). `dt engage` exits 2 and changes nothing when another live session holds the team (`--take-over`) or other live sessions share the tree (`--accept-others`); a holder that has gone, or is missing from a trusted registry (a cleared session), is replaced with a note.
+- The spawn guard refuses a spawn while a live session is unacknowledged for the goal (the PM asks you once), and refuses `devteam:*` agents from a session that does not own the team.
+- `dt scope start|check|accept`: a task's allowed files, and a report of every change outside them (committed, staged, unstaged or untracked) since the task started, attributed to another session when a hook saw it write. `dt close` and `dt scope start` refuse while any is unresolved; only the user keeps one.
+- `dt status` shows other live sessions and scope state; `dt trace report` gains `other-session-events`.
+- `/devteam:selftest` checks the registry (`sessions-registry`) and that a subagent cannot run `dt close` (`dt-authority-live`).
+### Notes
+- Detects and warns; it cannot prevent a write. The documented prevention is a worktree per session (`claude --worktree <name>`), described in the README.
+
 ## [0.2.5] - 2026-10-10
 Honest endings (gap G8): a goal that mostly works can now say so, instead of being stuck or hand-forced shut.
 ### Added

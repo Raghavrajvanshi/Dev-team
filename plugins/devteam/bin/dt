@@ -9,6 +9,8 @@ use File::Path qw(make_path);
 use DT qw(root ddir slurp spit jread jwrite ts true false default_state default_config state_read state_write
   config_read config_write goal_dir seal check_seal sha_file git_out tree_key run_cmd ledger_add
   locked update_state run_gates);
+use DT::Sessions qw(live_others holder_status lease_write foreign_writes ack acked probe);
+use DT::Scope ();
 
 my $MIN_CLAUDE = '2.1.295';
 my @NOISE = (':!.devteam', ':!.claude/worktrees', ':!.claude/settings.local.json');   # never make the tree "dirty"
@@ -24,7 +26,8 @@ my @EFFORTS = qw(low medium high xhigh max);
 # Checks that no hook can observe by itself; they are recorded with `dt trace note` (see skills/selftest).
 my @MANUAL = (['skills-preload', 'plugin skills preloaded into an agent by bare name'], ['model-override', 'the model passed on spawn is the model the agent runs as'],
     ['state-protect-live', 'a subagent write to protected state is denied'], ['git-guard-live', 'a subagent push is denied'],
-    ['dt-on-path', 'dt resolves from the plugin bin/ directory'], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
+    ['dt-on-path', 'dt resolves from the plugin bin/ directory'], ['dt-authority-live', 'a subagent running dt close is denied'],
+    ['sessions-registry', "Claude Code's session registry lists the running session"], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
 my %CMD = (
     init => \&c_init, gitignore => \&c_gitignore, preflight => \&c_preflight, state => \&c_state,
     engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
@@ -32,6 +35,7 @@ my %CMD = (
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
     team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge, trace => \&c_trace,
+    sessions => \&c_sessions, scope => \&c_scope,
 );
 
 my $cmd = shift @ARGV // '';
@@ -237,6 +241,10 @@ sub trace_report {
     my $same = grep { $_->{owned} } @ag;
     $add->(@ag ? 'info' : 'unseen', 'subagent-session-id', @ag ? ($same == @ag ? 'subagent events carry the owning session id' : 'subagent events carry a different session id than the owner (agent events are still governed)') : 'no subagent event was observed');
 
+    my @other = grep { !$_->{agent} && !$_->{owned} } @inp;
+    $add->(@other ? 'confirmed' : 'unseen', 'other-session-events',
+        @other ? scalar(@other) . ' hook event(s) from a session that does not own the team reached our hooks' : 'no event from another session was observed (needs a second session in the repo)');
+
     my @mo = grep { defined $_->{input}{tool_input}{model} || defined $_->{input}{tool_input}{effort} } @spawn;
     $add->(@mo ? 'info' : 'unseen', 'model-effort-passed',
         @mo ? 'passed on spawn: ' . join('; ', map { ($_->{input}{tool_input}{subagent_type} // '?') . ' model=' . ($_->{input}{tool_input}{model} // '-') . ' effort=' . ($_->{input}{tool_input}{effort} // '-') } @mo) : 'no spawn passed model or effort');
@@ -393,13 +401,33 @@ sub transition {
     print "$from -> $to\n";
 }
 
+# dt engage <session> [--take-over] [--accept-others]: exit 2 (nothing changed) when another session still holds the
+# team or other live sessions share this working tree; the user decides, then it is re-run with the flag.
 sub c_engage {
-    my ($sid) = @_;
-    die "usage: dt engage <session_id>\n" unless $sid;
+    my ($o, $p) = opts(@_);
+    my ($sid) = @$p;
+    die "usage: dt engage <session_id> [--take-over] [--accept-others]\n" unless $sid;
     c_init() unless -f ddir() . '/state.json';
-    my $s = state_read();
-    @$s{qw(engaged owner_session)} = (true, $sid);
-    state_write($s);
+    my @why;
+    my $result = locked(sub {    # one decision at a time: two sessions starting together cannot both win
+        my $s = state_read();
+        my $holder = $s->{engaged} ? ($s->{owner_session} // '') : '';
+        my $held = length $holder && $holder ne $sid ? holder_status($holder, $sid) : undef;
+        if ($held && $held->{live} && !$o->{'take-over'}) {
+            push @why, 'another session holds the team: ' . substr($holder, 0, 8) . " ($held->{why}). Take it over only if that is a window of yours you are done with: dt engage $sid --take-over";
+        }
+        my @others = grep { !($o->{'take-over'} && $_->{id} eq $holder) } live_others($sid);
+        push @why, scalar(@others) . " other Claude session(s) may be writing in this working tree:\n" . join("\n", map { '  - ' . describe($_) } @others)
+            . "\nFinish or stop them, work in a separate worktree, or continue alongside them: dt engage $sid --accept-others" if @others && !$o->{'accept-others'};
+        return 0 if @why;
+        @$s{qw(engaged owner_session)} = (true, $sid);
+        state_write($s);
+        lease_write($sid);
+        ledger_add({ event => 'engage', session => $sid, took_over => $held && $held->{live} ? $holder : '', others => scalar @others });
+        if ($held && !$held->{live}) { print 'note: ' . substr($holder, 0, 8) . " held the team earlier ($held->{why}); this session holds it now\n" }
+        return 1;
+    });
+    if (!$result) { print "ENGAGE NEEDS A CHOICE (nothing changed):\n- " . join("\n- ", @why) . "\n"; $EXIT = 2; return }
     print "engaged for session $sid\n";
 }
 sub c_disengage {
@@ -407,7 +435,7 @@ sub c_disengage {
     my $s = state_read();
     @$s{qw(engaged owner_session)} = (false, '');
     state_write($s);
-    unlink ddir() . '/team.json';
+    unlink ddir() . '/team.json', ddir() . '/session.lock';
     print "disengaged (the team is stood down; a new one is drawn next time)\n";
 }
 
@@ -619,6 +647,10 @@ sub c_close {
     my $v = verify_all(1);
     my @why;
     push @why, "locked acceptance tests were changed: @{ $v->{violations} }" if @{ $v->{violations} };
+    if (my $sc = DT::Scope::load()) {
+        my @out = DT::Scope::outside($sc);
+        push @why, "writes outside the task's scope are unresolved: @out (dt scope check; the user keeps them with dt scope accept)" if @out;
+    }
     if (length $s->{original_branch}) {
         my $now = git_out(root(), 'rev-parse', $s->{original_branch});
         push @why, "your branch '$s->{original_branch}' moved since the goal started" if $now ne $s->{original_sha};
@@ -799,6 +831,16 @@ sub c_status {
         my $oc = $s->{outcome} // {};
         print "outcome: " . uc($oc->{result}) . " ($oc->{pass}/$oc->{total} pass" . (@{ $oc->{open} } ? "; open: @{ $oc->{open} }" : '') . "): $oc->{why}\n" if $oc->{result};
     }
+    if ($s->{engaged}) {
+        my @live = live_others($s->{owner_session} // '');
+        my %ok = acked($s->{goal});
+        my $new = grep { !$ok{ $_->{id} } } @live;
+        print 'other live sessions: ' . (@live ? scalar(@live) . ($new ? " ($new not acknowledged: dt sessions)" : ' (acknowledged)') : 'none') . "\n";
+    }
+    if (length $s->{goal} && (my $sc = DT::Scope::load())) {
+        my @out = DT::Scope::outside($sc);
+        print "scope $sc->{task}: " . (@out ? scalar(@out) . ' unresolved out-of-scope write(s): dt scope check' : 'clean') . "\n";
+    }
     print "git grants: " . (join(', ', sort keys %{ $s->{git_grants} }) || 'none') . "\n";
     print "queued goals: " . scalar(@{ $s->{queue} }) . "\n";
     print "models chosen: " . ($cfg->{models_chosen} ? 'yes' : 'no') . "\n";
@@ -807,6 +849,85 @@ sub c_status {
     print "unattended-ready: " . allow_ready() . "\n";
     my $t = check_seal();
     print "TAMPER: protected files changed outside dt: @$t\n" if @$t;
+}
+
+sub describe {
+    my ($e) = @_;
+    return substr($e->{id}, 0, 8) . ($e->{pid} ? " pid $e->{pid}" : '') . ($e->{name} ? " \"$e->{name}\"" : '') . ', '
+        . ($e->{busy} ? 'busy' : "active $e->{age}s ago") . " (seen via $e->{via})";
+}
+
+sub c_sessions {
+    my ($sub, @a) = @_;
+    ($sub, @a) = ('list', $sub, @a) if defined $sub && $sub =~ /^--/;
+    need_init();
+    my ($o, $p) = opts(@a);
+    my $s = state_read();
+    my $self = $o->{self} // $s->{owner_session} // '';
+    $sub //= 'list';
+    return print map { "$_\n" } probe($o->{self} // $ENV{CLAUDE_SESSION_ID} // $self) if $sub eq 'probe';
+    my @live = live_others($self);
+    my %ok = acked($s->{goal});
+    if ($sub eq 'ack') {
+        my @ids;
+        for my $want (@$p ? @$p : map { $_->{id} } @live) {
+            my @m = grep { index($_->{id}, $want) == 0 } @live;
+            die "dt sessions ack: no live session matches '$want'\n" unless @m;
+            push @ids, map { $_->{id} } @m;
+        }
+        ack($s->{goal}, @ids);
+        ledger_add({ event => 'sessions_ack', goal => $s->{goal}, sessions => \@ids });
+        return print "acknowledged for $s->{goal}: " . join(', ', map { substr($_, 0, 8) } @ids) . "\n";
+    }
+    if ($sub eq 'check') { $EXIT = 1 if grep { !$ok{ $_->{id} } } @live; return }
+    die "dt sessions [list|ack [id...]|check|probe] [--self SESSION]\n" unless $sub eq 'list';
+    return print "other live sessions sharing this tree: none\n" unless @live;
+    print "other live sessions sharing this tree: " . scalar(@live) . "\n";
+    print '  ' . describe($_) . ($ok{ $_->{id} } ? '  [acknowledged]' : '') . "\n" for @live;
+    my @w = foreign_writes();
+    print "writes seen from other sessions (by our hooks):\n" . join('', map { "  $_->{path}  by " . substr($_->{session}, 0, 8) . " at " . strftime_local($_->{ts}) . "\n" } @w[0 .. ($#w > 9 ? 9 : $#w)]) if @w;
+}
+sub strftime_local { my @t = gmtime shift; sprintf '%02d:%02d:%02dZ', @t[2, 1, 0] }
+
+# Attribute out-of-scope paths to another session when our hooks saw it write them.
+sub scope_report {
+    my ($s, @out) = @_;
+    my $root = root();
+    my %by;
+    for my $w (foreign_writes()) {
+        (my $rel = $w->{path}) =~ s{^\Q$root\E/(?:\.claude/worktrees/[^/]+/)?}{};
+        $by{$rel} //= $w;
+    }
+    return map { my $w = $by{$_}; "  $_  " . ($w ? 'written by another session (' . substr($w->{session}, 0, 8) . ' at ' . strftime_local($w->{ts}) . ')' : 'writer unknown (the engineer, another session or a tool)') . "\n" } @out;
+}
+
+# dt scope start <task> <allowed...> | check | accept <path...>|--all
+sub c_scope {
+    my ($sub, @a) = @_;
+    need_init();
+    my ($o, $p) = opts(@a);
+    $sub //= 'check';
+    if ($sub eq 'start') {
+        my ($task, @allow) = @$p;
+        die "dt scope start <task-id> <allowed file|dir/|glob>...\n" unless length($task // '') && @allow;
+        DT::Scope::start($task, @allow);
+        return print "scope $task set: " . join(', ', @allow) . "\n";
+    }
+    my $s = DT::Scope::load() or return print "no scope set for this goal (dt scope start <task> <allowed files>)\n";
+    my @out = DT::Scope::outside($s);
+    if ($sub eq 'accept') {
+        my @take = $o->{all} ? @out : @$p;
+        die "dt scope accept <path>... | --all (the user's decision to keep these)\n" unless @take;
+        DT::Scope::accept($s, @take);
+        ledger_add({ event => 'scope_accept', task => $s->{task}, paths => \@take });
+        return print 'accepted: ' . join(', ', @take) . "\n";
+    }
+    die "dt scope start|check|accept\n" unless $sub eq 'check';
+    print "scope $s->{task}: allowed " . join(', ', @{ $s->{allow} }) . "\n";
+    return print "in scope: nothing outside the allowed files has changed\n" unless @out;
+    print "OUT OF SCOPE: " . scalar(@out) . " path(s) changed that this task was not meant to touch:\n", scope_report($s, @out),
+        "Show the user. They decide: keep (dt scope accept <path>) or remove (only with their approval). Nothing closes until this is resolved.\n";
+    $EXIT = 1;
 }
 
 sub c_queue {

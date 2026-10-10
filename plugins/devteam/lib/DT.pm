@@ -85,6 +85,7 @@ sub default_config {
         soft => { function_lines => 40, file_lines => 300, params => 4 },
         prices => { opus => 5, sonnet => 1, haiku => 0.25 },
         fix_rounds => 3,
+        sessions => { live_secs => 1800 },    # a session active within this many seconds counts as live
     };
 }
 
