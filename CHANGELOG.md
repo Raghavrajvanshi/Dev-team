@@ -2,6 +2,14 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.3] - 2026-10-10
+Live verification (gap G1): a way to settle what Claude Code really does, from a real run.
+### Added
+- Tracing: `dt trace on|off|status|show|clear|note|report`, or `DT_TRACE=1`. Every hook records its raw input (truncated) and its decision to `.devteam/trace.jsonl`; a `SubagentStart` and a `SessionStart` trace-only handler capture events nothing else listens to. Off by default, and the trace-only handler does not even start Perl while it is off.
+- `dt trace report`: a verdict per assumption (agent input fields, `agent_id` on subagent calls, `agent_type` format, subagent start and stop fields, model and effort passed, compact `SessionStart`, finish-gate blocks, token usage in the ledger) plus recorded manual checks.
+- `/devteam:selftest`: a live self-test for a scratch repo. It starts three probe agents, attempts actions that must be refused, and records verdicts for skill preloading, the model override, state protection, the git guard, the spawn guard and `dt` on PATH.
+- A structural test that fails if `dt` declares file-level data after its dispatcher's `exit` (the cause of two earlier bugs).
+
 ## [0.2.2] - 2026-10-10
 ### Added
 - CI (`.github/workflows/ci.yml`): the offline test suite on Ubuntu and macOS, and `claude plugin validate --strict` for the marketplace, plugin, skills and agents, on every push to `main` and every pull request. README badge added.

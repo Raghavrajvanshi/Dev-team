@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (280) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (317) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -56,7 +56,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.2.2  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.3  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -113,6 +113,7 @@ For example: *"Add a /health endpoint that returns {status: ok}, with a test."* 
 | `/devteam:changemodels` | Pick team members, then set their model and effort |
 | `/devteam:lifecycle [name]` | Show or change the process lifecycle |
 | `/devteam:ask <role> <question>` | One-off consult with a role (read-only) |
+| `/devteam:selftest` | In a scratch repo, check what Claude Code really does with the plugin (see below) |
 
 ### The team
 
@@ -138,7 +139,7 @@ Passing checks is not the same as good work, so the process is built around qual
 
 1. **Research first, never from memory.** The Research Analyst establishes what is current (verified versions, current idioms, how leading examples in the domain are built) and writes a cited `reference.md`; topics are cached in `.devteam/knowledge/` for 30 days. The Architect and designers can search and fetch the web too, and engineers can confirm an API in the docs.
 2. **Design before building** for anything user-facing: the UX Designer writes a design spec (art direction, tokens, layout, real content, imagery plan, motion, states) from the reference and any live examples you give.
-3. **Look at the result.** `dt shot` takes headless-Chrome screenshots at 390, 768 and 1280. Engineers review their own screenshots, QA captures every page, and the Designer scores them against a rubric (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity).
+3. **Look at the result.** `dt shot` takes headless-Chrome screenshots at 390, 768 and 1317. Engineers review their own screenshots, QA captures every page, and the Designer scores them against a rubric (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity).
 4. **Polish until it passes.** Anything under 4 of 5 goes back to an engineer with concrete fixes, for up to two rounds; if it still fails you see the scores and screenshots.
 5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
@@ -167,6 +168,18 @@ Passing checks is not the same as good work, so the process is built around qual
 | Goal is `BLOCKED` | `/devteam:status` shows why. Resolve it and run `/devteam:start` to resume, or `/devteam:stop` |
 | The team is in the way of normal work | `/devteam:stop`, or `claude plugin disable devteam@devteam-marketplace` |
 
+## Check your install: the self-test
+
+Several behaviours (how Claude Code passes agent ids to hooks, whether plugin skills preload into agents, the model override on spawn) could only be assumed when the plugin was written. `/devteam:selftest` settles them from evidence. Run it in a **scratch git repo**: it starts three cheap probe agents and attempts a few actions that must be refused, then prints a checklist.
+
+```
+/devteam:selftest
+dt trace report          # the checklist: confirmed, refuted, suspect or unseen for each assumption
+dt trace show --tail 60  # the raw records behind it
+```
+
+Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) makes every hook record its input and decision to `.devteam/trace.jsonl`. Those records are local, gitignored, and may hold fragments of prompts and commands. If a line says `refuted` or `suspect`, please send the report: that is exactly the data used to fix the plugin.
+
 ## Status and known limits
 
 **Tested** (`prove tests/`): the `dt` CLI (state machine, goals, hash-locked criteria, verification, tree-hash gate cache, close gate, lifecycle selector, model/effort settings, git grants), the git command classifier, and every hook. `claude plugin validate --strict` passes for the marketplace, plugin, skills and agents, and a fresh install from this repo works.
@@ -180,7 +193,7 @@ Passing checks is not the same as good work, so the process is built around qual
 ## Develop
 
 ```bash
-prove tests/                                        # 280 tests
+prove tests/                                        # 317 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

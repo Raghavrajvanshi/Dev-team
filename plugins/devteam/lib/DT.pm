@@ -70,7 +70,7 @@ sub default_config {
         researcher => ['sonnet', 'medium'], 'tech-writer' => ['haiku', 'low'], 'ux-designer' => ['sonnet', 'high'],
     );
     return {
-        version => 1,
+        version => 1, trace => false,
         models => { map { $_ => { model => $m{$_}[0], effort => $m{$_}[1] } } keys %m },
         escalation => 'opus', models_chosen => false,
         lanes => {

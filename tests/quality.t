@@ -69,4 +69,26 @@ my @paths = split /\n/, $out;
 is(scalar @paths, 2, 'one screenshot per width');
 like($paths[0], qr{/goals/G-001/evidence/shots/home-390\.png$}, 'screenshots land in the goal evidence');
 like(slurp($paths[1]), qr/PNG 1280,2400/, 'the requested window size reached the browser');
+
+# --- dt must not declare file-level data below its dispatcher's exit: it would be empty when used ---
+{
+    my @l = split /\n/, slurp("$PLUGIN/bin/dt");
+    my ($exit) = grep { $l[$_] =~ /^exit \$EXIT;/ } 0 .. $#l;
+    ok(defined $exit, 'dt has a dispatcher with a single exit');
+    my @late = grep { $l[$_] =~ /^my [\@%\$]/ } $exit + 1 .. $#l;
+    is(scalar @late, 0, 'no file-level my declaration follows the dispatcher exit') or diag join "\n", map { $l[$_] } @late;
+}
+
+# --- the selftest skill covers every manual check the report expects ---
+{
+    my $dt = slurp("$PLUGIN/bin/dt");
+    my ($block) = $dt =~ /my \@MANUAL = \((.*?)\);/s;
+    my @ids = $block =~ /\['([a-z-]+)',/g;
+    cmp_ok(scalar @ids, '>=', 6, 'the report expects manual checks');
+    my $skill = slurp("$PLUGIN/skills/selftest/SKILL.md");
+    for my $id (grep { $_ ne 'pm-mode' } @ids) { like($skill, qr/\b\Q$id\E\b/, "selftest records $id") }
+    like($skill, qr/dt trace note pm-mode/, 'selftest says how to record the PM mode check');
+    like($skill, qr/^disable-model-invocation: true$/m, 'selftest is user-only: it spawns agents');
+}
+
 done_testing;

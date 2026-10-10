@@ -20,7 +20,11 @@
         { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh", "ledger"], "timeout": 10 }
       ] }
     ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh", "trace"], "timeout": 10 } ] }
+    ],
     "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh", "trace"], "timeout": 10 } ] },
       { "matcher": "compact", "hooks": [ { "type": "command", "command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh", "compact-reinject"], "timeout": 10 } ] }
     ]
   }

@@ -21,13 +21,17 @@ my %NEXT = (
 );
 my @MODELS = qw(opus sonnet haiku inherit);
 my @EFFORTS = qw(low medium high xhigh max);
+# Checks that no hook can observe by itself; they are recorded with `dt trace note` (see skills/selftest).
+my @MANUAL = (['skills-preload', 'plugin skills preloaded into an agent by bare name'], ['model-override', 'the model passed on spawn is the model the agent runs as'],
+    ['state-protect-live', 'a subagent write to protected state is denied'], ['git-guard-live', 'a subagent push is denied'],
+    ['dt-on-path', 'dt resolves from the plugin bin/ directory'], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
 my %CMD = (
     init => \&c_init, gitignore => \&c_gitignore, preflight => \&c_preflight, state => \&c_state,
     engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
     verify => \&c_verify, gate => \&c_gate, close => \&c_close, lifecycle => \&c_lifecycle,
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
-    team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge,
+    team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge, trace => \&c_trace,
 );
 
 my $cmd = shift @ARGV // '';
@@ -192,6 +196,118 @@ sub c_knowledge {
     @rows = grep { $_->[1] >= $o->{stale} } @rows if defined $o->{stale};
     return print "no cached knowledge\n" unless @rows;
     printf "%-28s %4d days  %s\n", @$_ for sort { $a->[0] cmp $b->[0] } @rows;
+}
+
+sub trace_report {
+    my ($recs) = @_;
+    my @inp = grep { ref $_->{input} } @$recs;
+    my $by = sub { my $h = shift; grep { ($_->{handler} // '') eq $h } @inp };
+    my @row;
+    my $add = sub { push @row, [@_] };
+    my $list = sub { join ', ', sort keys %{ { map { $_ => 1 } @_ } } };
+
+    my @spawn = $by->('guard');
+    my %k;
+    $k{$_}++ for map { keys %{ $_->{input}{tool_input} // {} } } @spawn;
+    $add->(@spawn ? ($k{subagent_type} ? 'confirmed' : 'refuted') : 'unseen', 'agent-input-fields',
+        @spawn ? 'Agent tool input fields seen: ' . join(', ', sort keys %k) : 'no spawn was observed');
+
+    my @tool = ($by->('state-protect'), $by->('git-guard'));
+    my @with_id = grep { length($_->{input}{agent_id} // '') } @tool;
+    $add->(@with_id ? 'confirmed' : (@spawn && @tool ? 'suspect' : 'unseen'), 'agent-id-on-subagent-calls',
+        @with_id ? scalar(@with_id) . " subagent tool call(s) carried agent_id" :
+        (@spawn && @tool ? 'agents were spawned and tools ran, but none carried agent_id (or no subagent used a tool)' : 'no subagent tool call was observed'));
+
+    my @types = grep { length } map { $_->{input}{agent_type} // '' } grep { $_->{agent} } @inp;
+    my @bare = grep { !/^devteam:/ } @types;
+    $add->(!@types ? 'unseen' : (@bare ? 'refuted' : 'confirmed'), 'agent-type-values',
+        !@types ? 'no subagent event carried agent_type' : 'values seen: ' . $list->(@types) . (@bare ? ' (the role matrix expects the devteam: prefix)' : ''));
+
+    my @stop = grep { ($_->{event} // '') eq 'SubagentStop' } @inp;
+    my %sk;
+    $sk{$_}++ for map { keys %{ $_->{input} } } @stop;
+    $add->(@stop ? 'info' : 'unseen', 'subagent-stop-fields', @stop ? 'fields: ' . join(', ', sort keys %sk) : 'no SubagentStop was observed');
+
+    my @start = grep { ($_->{event} // '') eq 'SubagentStart' } @inp;
+    my %tk;
+    $tk{$_}++ for map { keys %{ $_->{input} } } @start;
+    $add->(@start ? 'info' : 'unseen', 'subagent-start-fields', @start ? 'fields: ' . join(', ', sort keys %tk) : 'no SubagentStart was observed');
+
+    my @ag = grep { $_->{agent} } @inp;
+    my $same = grep { $_->{owned} } @ag;
+    $add->(@ag ? 'info' : 'unseen', 'subagent-session-id', @ag ? ($same == @ag ? 'subagent events carry the owning session id' : 'subagent events carry a different session id than the owner (agent events are still governed)') : 'no subagent event was observed');
+
+    my @mo = grep { defined $_->{input}{tool_input}{model} || defined $_->{input}{tool_input}{effort} } @spawn;
+    $add->(@mo ? 'info' : 'unseen', 'model-effort-passed',
+        @mo ? 'passed on spawn: ' . join('; ', map { ($_->{input}{tool_input}{subagent_type} // '?') . ' model=' . ($_->{input}{tool_input}{model} // '-') . ' effort=' . ($_->{input}{tool_input}{effort} // '-') } @mo) : 'no spawn passed model or effort');
+
+    my @comp = grep { ($_->{event} // '') eq 'SessionStart' } @inp;
+    my %src;
+    $src{ $_->{input}{source} // '?' }++ for @comp;
+    $add->(%src ? ($src{compact} ? 'confirmed' : 'info') : 'unseen', 'session-start-sources', %src ? 'sources seen: ' . join(', ', sort keys %src) : 'no SessionStart was observed');
+
+    my @dec = grep { ref $_->{decision} eq 'HASH' && ($_->{decision}{exit} // 0) == 2 } @$recs;
+    $add->(@dec ? 'info' : 'unseen', 'finish-gate-blocked', @dec ? scalar(@dec) . ' finish-gate block(s) issued (check the next SubagentStop for the same agent to see it was honoured)' : 'the finish gate never blocked');
+
+    my @pr = grep { ($_->{event} // '') eq 'UserPromptSubmit' } @inp;
+    my @odd = grep { ($_->{input}{prompt} // '') =~ /<(?:task-notification|cross-session|system-reminder)/ } @pr;
+    $add->(@pr ? 'info' : 'unseen', 'prompt-submit-turns', @pr ? scalar(@pr) . ' prompt event(s), ' . scalar(@odd) . ' look like non-user turns' : 'no UserPromptSubmit was observed');
+
+    my ($tot, $withtok) = (0, 0);
+    if (open my $lh, '<', ddir() . '/log.jsonl') {
+        while (my $l = <$lh>) { my $r = eval { decode_json($l) } or next; next unless ($r->{event} // '') eq 'subagent_stop'; $tot++; $withtok++ if $r->{tokens} }
+    }
+    $add->($tot ? ($withtok ? 'confirmed' : 'refuted') : 'unseen', 'subagent-token-usage',
+        $tot ? "$withtok of $tot subagent stops had token usage in the ledger" : 'no subagent stop reached the ledger');
+
+    my %note;
+    for my $r (grep { ($_->{kind} // '') eq 'note' } @$recs) { $note{ $r->{id} } = $r }
+    for my $m (@MANUAL) {
+        my $n = $note{ $m->[0] };
+        $add->($n ? $n->{verdict} : 'unseen', $m->[0], $n ? "$m->[1]: " . ($n->{text} || '(no evidence given)') : "$m->[1]: no note recorded (run the selftest)");
+    }
+    printf "%-10s %-28s %s\n", @$_ for @row;
+    my %c;
+    $c{ $_->[0] }++ for @row;
+    print "\n" . join(', ', map { "$_ $c{$_}" } sort keys %c) . "\n";
+}
+
+# dt trace on|off|status|show [--tail N]|clear|note ID confirmed|refuted|unseen [evidence...]|report
+sub c_trace {
+    my ($sub, @a) = @_;
+    need_init();
+    $sub //= 'status';
+    my $f = ddir() . '/trace.jsonl';
+    if ($sub eq 'on' || $sub eq 'off') {
+        my $c = config_read();
+        $c->{trace} = $sub eq 'on' ? true : false;
+        config_write($c);
+        return print "trace $sub (records go to .devteam/trace.jsonl; they may hold fragments of prompts and commands)\n";
+    }
+    if ($sub eq 'clear') { unlink $f; return print "trace cleared\n" }
+    if ($sub eq 'note') {
+        my ($id, $verdict, @t) = @a;
+        die "dt trace note ID confirmed|refuted|unseen [evidence...]\n" unless length($id // '') && ($verdict // '') =~ /^(?:confirmed|refuted|unseen)$/;
+        open my $h, '>>', $f or die "dt: cannot write the trace: $!\n";
+        print $h JSON::PP->new->canonical->encode({ ts => ts(), kind => 'note', id => $id, verdict => $verdict, text => join(' ', @t) }), "\n";
+        close $h;
+        return print "noted $id: $verdict\n";
+    }
+    my @recs = map { eval { decode_json($_) } || () } split /\n/, (slurp($f) // '');
+    if ($sub eq 'status') { return printf "trace: %s, %d record(s)\n", (config_read()->{trace} ? 'on' : 'off'), scalar @recs }
+    if ($sub eq 'show') {
+        my ($o) = opts(@a);
+        my $n = ($o->{tail} // 40) =~ /^(\d+)$/ ? $1 : 40;
+        my @t = @recs > $n ? @recs[-$n .. -1] : @recs;
+        for my $r (@t) {
+            if (($r->{kind} // '') eq 'note') { print "$r->{ts} note $r->{id}: $r->{verdict} $r->{text}\n" }
+            elsif (exists $r->{decision}) { my $d = ref $r->{decision} ? encode_json($r->{decision}) : $r->{decision}; print "$r->{ts} $r->{handler} -> " . substr($d, 0, 110) . "\n" }
+            else { printf "%s %-16s %-17s agent=%d owned=%d keys=%s\n", $r->{ts}, $r->{handler}, $r->{event} // '', $r->{agent} // 0, $r->{owned} // 0, join(',', sort keys %{ $r->{input} // {} }) }
+        }
+        return;
+    }
+    return trace_report(\@recs) if $sub eq 'report';
+    die "dt trace: on|off|status|show [--tail N]|clear|note ID VERDICT [evidence]|report\n";
 }
 
 sub c_init {

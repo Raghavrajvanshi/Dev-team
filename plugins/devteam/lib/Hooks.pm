@@ -4,7 +4,7 @@ package Hooks;
 use strict;
 use warnings;
 use JSON::PP;
-use DT qw(root ddir slurp spit jread ledger_add state_read state_write update_state config_read check_seal seal
+use DT qw(root ddir slurp spit jread ts ledger_add state_read state_write update_state config_read check_seal seal
   goal_dir git_out run_gates usage_since locked);
 use DT::Git qw(classify);
 use Exporter 'import';
@@ -14,14 +14,35 @@ my $J = JSON::PP->new->canonical;
 my %WRITER = map { ("devteam:$_" => 1) } qw(fullstack-engineer backend-engineer frontend-engineer
   mobile-engineer devops-engineer qa-engineer tech-writer);
 
-sub out     { print $J->encode($_[0]); exit 0 }
+# Trace: with DT_TRACE=1 or `dt trace on`, every hook records what it was given and what it decided,
+# so assumptions about Claude Code can be settled from a real run (see `dt trace report`).
+my ($TRACE, $CUR) = (0, '');
+sub trace_on { $ENV{DT_TRACE} ? 1 : (config_read()->{trace} ? 1 : 0) }
+sub shrink {
+    my ($v, $d) = @_;
+    $d //= 0;
+    return '[...]' if $d > 4;
+    if (ref $v eq 'HASH')  { my @k = sort keys %$v; return { map { $_ => shrink($v->{$_}, $d + 1) } @k[0 .. ($#k > 24 ? 24 : $#k)] } }
+    if (ref $v eq 'ARRAY') { return [ map { shrink($_, $d + 1) } @$v[0 .. ($#$v > 9 ? 9 : $#$v)] ] }
+    return $v if ref $v || !defined $v;
+    my $str = "$v";
+    return length($str) > 120 ? substr($str, 0, 120) . '...(' . length($str) . ' chars)' : $str;
+}
+sub trace {
+    return unless $TRACE;
+    my ($rec) = @_;
+    @$rec{qw(ts handler)} = (ts(), $rec->{handler} // $CUR);
+    if (open my $h, '>>', ddir() . '/trace.jsonl') { print $h $J->encode($rec), "\n"; close $h }
+}
+
+sub out     { trace({ decision => $_[0] }); print $J->encode($_[0]); exit 0 }
 sub deny    { out({ hookSpecificOutput => { hookEventName => 'PreToolUse', permissionDecision => 'deny', permissionDecisionReason => "devteam: $_[0]" } }) }
 sub context { out({ hookSpecificOutput => { hookEventName => $_[0], additionalContext => $_[1] } }) }
 
 my %H = (
     guard => \&guard, 'state-protect' => \&state_protect, 'git-guard' => \&git_guard, route => \&route,
     'finish-gate' => \&finish_gate, 'turn-count' => \&turn_count, 'compact-reinject' => \&compact_reinject,
-    ledger => \&ledger,
+    ledger => \&ledger, trace => sub { },
 );
 
 sub dispatch {
@@ -30,10 +51,14 @@ sub dispatch {
     my $st = state_read();
     return unless $st->{engaged};
     my $agent = length($in->{agent_id} // '') ? 1 : 0;
+    my $owned = ($st->{owner_session} // '') eq ($in->{session_id} // '') ? 1 : 0;
+    ($TRACE, $CUR) = (trace_on(), $name);
+    trace({ event => $in->{hook_event_name}, agent => $agent, owned => $owned, status => $st->{status}, input => shrink($in) });
     # Main-thread events belong to the owning session only; subagent calls always belong to the engaged team.
-    return if !$agent && ($st->{owner_session} // '') ne ($in->{session_id} // '');
+    return if !$agent && !$owned;
     $st = tamper($st);
     $h->($in, $st, $agent);
+    trace({ decision => 'none' });
 }
 
 # A protected file changed outside dt. During a goal that blocks the run; otherwise the edit is accepted.
@@ -139,6 +164,7 @@ sub finish_gate {
         }
     });
     if ($n > $cap) { ledger_add({ event => 'gate_exhausted', agent_type => $in->{agent_type} }); return }
+    trace({ decision => { exit => 2, retry => $n } });
     print STDERR "devteam gate failed (retry $n of $cap). Fix it and finish again:\n$msg\n";
     exit 2;
 }
