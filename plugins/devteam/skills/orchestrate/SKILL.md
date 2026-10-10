@@ -42,7 +42,12 @@ Follow the profile's phases and ceremonies as light bookkeeping on the board: ta
 2. One AskUserQuestion: every open `manual` criterion; in the tiny lane whether to commit; whether to open a PR, showing the exact commands (`git push -u origin devteam/<goal>`, `gh pr create ...`).
 3. For each manual criterion the user confirmed: `dt criteria confirm Cn --by user`. Then `dt close`. If it refuses, read why: fix and return with `dt state transition ACTIVE` (at most 2 returns), or ask the user.
 4. If `restore` was granted, `dt branch finish`. If a PR was approved, run the approved commands.
-5. Report in at most 8 lines: what changed, criteria, the closure report path, `dt ledger`. The state is now IDLE and nothing is running. A new message starts a new goal.
+5. Report in at most 8 lines: what changed, criteria, the **outcome** (`dt status`), the closure report path, `dt ledger`. The state is now IDLE and nothing is running. A new message starts a new goal.
+
+## When it will not fully verify
+After the second return, or when a criterion cannot be met, do not loop and do not weaken a criterion to make it pass. Run `dt state transition VERIFYING` if needed, then `dt close --accept-partial`: it prints the unmet criteria and records nothing. Put that list to the user in one AskUserQuestion with these exits: **keep going** (more rounds), **amend** the criteria (`/devteam:amend`), **accept as partial**, **stop** (recorded as failed). Offer "accept as partial" only when `dt` allows it (at least one criterion passes). If they accept, ask once for their reason in their own words, then `dt close --accept-partial --reason "<their words>" --by user`. Never supply the reason yourself, never pass `--by user` without their yes in this conversation, and never present partial as success: say "partial" and name the open criteria. A lock violation, tampered file or moved branch cannot be closed as partial; show the refusal and fix or stop.
+
+Outcomes: `verified` (every criterion passes), `partial` (the user accepted open criteria), `failed` (stopped before closing), `blocked` (stopped while blocked). Each is in `closure.md`, the ledger and `dt status`.
 
 ## Exception stops
 Run `dt state transition BLOCKED "<reason>"`, ask the user, and resume with `dt state transition ACTIVE`. Triggers: the design changes scope, non-goals or a criterion; a lane cap or the complexity budget is exceeded; the same error three times; gates failing after 3 retries (a hook sets this); a command outside the allow-list; any push, PR, deploy or destructive git; a reviewer flags a risky diff; protected files changed outside dt.

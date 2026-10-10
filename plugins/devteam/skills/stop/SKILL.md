@@ -11,4 +11,4 @@ Honour this at once. Ask only if there is unmerged work.
 2. `dt state transition STOPPED`.
 3. If the `restore` grant exists and a branch was started: `dt branch finish`; report any error instead of hiding it.
 4. If `git worktree list` shows worktrees under `.claude/worktrees/` made for this goal, remove merged ones; keep or remove the rest only as the user said.
-5. `dt state transition IDLE`, `dt disengage`. Report in three lines: what was kept, where, and how to start again (`/devteam:start`).
+5. `dt state transition IDLE`, `dt disengage`. Report in three lines: what was kept and where, the outcome `dt status` recorded for the goal (`failed`, or `blocked` if it was waiting on the user; none if it was never confirmed) with its closure report, and how to start again (`/devteam:start`).

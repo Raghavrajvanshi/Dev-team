@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use Text::ParseWords qw(shellwords);
 use Exporter 'import';
-our @EXPORT_OK = qw(classify %RANK);
+our @EXPORT_OK = qw(classify segments %RANK);
 
 # none < read < local < remote < destructive < unverifiable
 our %RANK = (none => 0, read => 1, local => 2, remote => 3, destructive => 4, unverifiable => 5);

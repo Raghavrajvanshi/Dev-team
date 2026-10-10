@@ -46,7 +46,7 @@ sub opts {
     while (@_) {
         my $a = shift;
         if ($a =~ /^--([\w-]+)=(.*)$/s) { $o{$1} = $2 }
-        elsif ($a =~ /^--([\w-]+)$/) { $o{$1} = (@_ && $_[0] !~ /^--/) ? shift : 1 }
+        elsif ($a =~ /^--([\w-]+)$/) { my $k = $1; $o{$k} = (@_ && $_[0] !~ /^--/) ? shift : 1 }    # $k first: the inner match resets $1
         else { push @p, $a }
     }
     return (\%o, \@p);
@@ -361,7 +361,7 @@ sub c_state {
     if ($sub eq 'set') {
         for my $kv (@a) {
             my ($k, $v) = split /=/, $kv, 2;
-            die "dt: unknown or protected state key '$k'\n" unless defined $v && exists default_state()->{$k} && $k !~ /^(?:status|engaged|owner_session|retries|git_grants|queue)$/;
+            die "dt: unknown or protected state key '$k'\n" unless defined $v && exists default_state()->{$k} && $k !~ /^(?:status|engaged|owner_session|retries|git_grants|queue|outcome)$/;
             $s->{$k} = $k =~ /^(?:spawns|spawn_cap|main_turns|turn_cap|returns|ledger_offset)$/ ? $v + 0 : $k eq 'adhoc' ? ($v =~ /^(?:1|true|yes)$/ ? true : false) : $v;
         }
         return state_write($s);
@@ -377,6 +377,14 @@ sub transition {
     die "dt: ACHIEVED is reached only through 'dt close'\n" if $to eq 'ACHIEVED';
     die "dt: BLOCKED needs a reason\n" if $to eq 'BLOCKED' && !length $why;
     die "dt: illegal transition $from -> $to\n" unless $to eq 'STOPPED' || grep { $_ eq $to } @{ $NEXT{$from} };
+    if ($to eq 'STOPPED' && $from =~ /^(?:ACTIVE|PAUSED|BLOCKED|VERIFYING)$/ && length $s->{goal}) {
+        # A goal that was confirmed and then ended without closing still gets an honest outcome.
+        my ($result, $because) = $from eq 'BLOCKED'
+            ? ('blocked', "stopped while blocked: $s->{blocked_reason}") : ('failed', "stopped before it was closed (was $from)");
+        # Stopping is always honoured: a report that cannot be written is noted, never a reason to refuse.
+        $s->{outcome} = eval { end_goal($s, $result, $because) }
+            // { result => $result, why => "$because (closure report not written: " . ($@ =~ s/\s+\z//r) . ')', pass => 0, total => 0, open => [], ts => ts() };
+    }
     $s->{status} = $to;
     $s->{blocked_reason} = $to eq 'BLOCKED' ? $why : '';
     $s->{adhoc} = false;
@@ -422,7 +430,7 @@ sub c_goal {
         spit("$dir/board.md", slurp("$PLUGIN/templates/board.md") // "# Board\n");
         jwrite("$dir/criteria.json", { criteria => [], locks => {} });
         @$s{qw(goal lane lifecycle spawns spawn_cap main_turns turn_cap returns)} = ($id, '', '', 0, 0, 0, 0, 0);
-        @$s{qw(retries git_grants blocked_reason ledger_offset integration_branch original_branch original_sha)} = ({}, {}, '', 0, '', '', '');
+        @$s{qw(retries git_grants blocked_reason ledger_offset integration_branch original_branch original_sha outcome)} = ({}, {}, '', 0, '', '', '', {});
         $s->{status} = 'INTAKE';
         state_write($s);
         ledger_add({ event => 'goal_new', goal => $id, title => $title });
@@ -527,11 +535,14 @@ sub c_criteria {
 sub verify_all {
     my ($quiet) = @_;
     my $f = goal_file('criteria.json');
+    my $t = check_seal();
+    die "dt: protected files changed outside dt: @$t (review them, then 'dt resync')\n" if @$t;   # re-sealing would accept them
     my $c = jread($f);
     my $root = root();
     my $key = tree_key($root);
     my $to = config_read()->{gates}{timeout} || 300;
-    my (@viol, @pending, $pass);
+    my (@viol, @pending);
+    my $pass = 0;
     for my $file (sort keys %{ $c->{locks} }) { push @viol, $file if sha_file("$root/$file") ne $c->{locks}{$file} }
     for my $cr (@{ $c->{criteria} }) {
         if ($cr->{type} eq 'cmd') {
@@ -553,9 +564,10 @@ sub verify_all {
     seal();
     my $total = @{ $c->{criteria} };
     print "verify: $pass/$total pass" . (@pending ? "; awaiting confirmation: @pending" : '') . (@viol ? "; LOCK_VIOLATION: @viol" : '') . "\n" unless $quiet;
-    return (!@viol && !@pending && $pass == $total) ? 1 : 0;
+    my @open = map { $_->{id} } grep { !$_->{passes} } @{ $c->{criteria} };
+    return { ok => (!@viol && !@open) ? 1 : 0, pass => $pass, total => $total, open => \@open, violations => \@viol };
 }
-sub c_verify { need_init(); $EXIT = verify_all() ? 0 : 1; return }
+sub c_verify { need_init(); $EXIT = verify_all()->{ok} ? 0 : 1; return }
 
 sub c_gate {
     my ($sub, @a) = @_;
@@ -578,28 +590,66 @@ sub c_gate {
     return;
 }
 
+# Record how a goal ended: the closure report, the ledger entry and the outcome record kept in state.
+# result is verified | partial | failed | blocked; the caller stores the returned record in state.
+sub end_goal {
+    my ($s, $result, $because, $gates) = @_;
+    my @all = @{ (jread(goal_file('criteria.json')) // {})->{criteria} // [] };
+    my @open = map { $_->{id} } grep { !$_->{passes} } @all;
+    my $pass = @all - @open;
+    spit(goal_file('closure.md'),
+        "# $s->{goal} closed " . ts() . "\noutcome: " . uc($result) . " ($pass of " . scalar(@all) . " criteria pass)\n"
+      . "lane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\n"
+      . (defined $gates ? "gates: $gates\n" : '') . "why: $because\n\n"
+      . join('', map { "- $_->{id} " . ($_->{passes} ? 'PASS' : 'OPEN') . ": $_->{text}\n" } @all));
+    ledger_add({ event => 'goal_closed', goal => $s->{goal}, outcome => $result, spawns => $s->{spawns}, open => \@open });
+    return { result => $result, why => $because, pass => $pass, total => scalar @all, open => \@open, ts => ts() };
+}
+
+# dt close: verified when every criterion passes. dt close --accept-partial --reason TEXT --by user: partial,
+# only with the user's acceptance and never over a lock violation, tamper or a moved branch.
 sub c_close {
     need_init();
+    my ($o) = opts(@_);
     my $s = state_read();
     die "dt: close needs status VERIFYING (is $s->{status}); finish the work first\n" unless $s->{status} eq 'VERIFYING';
+    my $partial = $o->{'accept-partial'} ? 1 : 0;
+    my $tamper = check_seal();    # first: verify_all re-seals, so a second attempt must not see a clean seal
+    if (@$tamper) { print "CLOSE REFUSED:\n- protected files changed outside dt: @$tamper (review, then 'dt resync')\n"; $EXIT = 1; return }
+    my $v = verify_all(1);
     my @why;
-    my $tamper = check_seal();
-    push @why, "protected files changed outside dt: @$tamper (review, then 'dt resync')" if @$tamper;
-    push @why, 'done-criteria not all verified (run: dt verify)' unless verify_all(1);
-    my ($ok, $msg) = run_gates(root(), 1);
-    push @why, $msg unless $ok;
+    push @why, "locked acceptance tests were changed: @{ $v->{violations} }" if @{ $v->{violations} };
     if (length $s->{original_branch}) {
         my $now = git_out(root(), 'rev-parse', $s->{original_branch});
         push @why, "your branch '$s->{original_branch}' moved since the goal started" if $now ne $s->{original_sha};
     }
+    if ($partial) {
+        push @why, 'every criterion passes, so nothing is partial: use plain dt close' unless @{ $v->{open} };
+        push @why, 'no criterion passes: that is a failed goal, not a partial one (stopping it records that)' unless $v->{pass};
+    }
+    else { push @why, "done-criteria not all verified: @{ $v->{open} } (run: dt verify)" if @{ $v->{open} } }
+    my ($gok, $gmsg) = (1, '');
+    ($gok, $gmsg) = run_gates(root(), 1) unless @why;
+    push @why, $gmsg unless $gok || $partial;
     if (@why) { print "CLOSE REFUSED:\n- " . join("\n- ", @why) . "\n"; $EXIT = 1; return }
-    my $c = jread(goal_file('criteria.json'));
-    spit(goal_file('closure.md'), "# $s->{goal} closed " . ts() . "\nlane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\ngates: $msg\n\n" .
-        join('', map { "- $_->{id} PASS: $_->{text}\n" } @{ $c->{criteria} }));
-    update_state(sub { $_[0]{status} = 'ACHIEVED' });
-    ledger_add({ event => 'goal_achieved', goal => $s->{goal}, spawns => $s->{spawns} });
-    update_state(sub { $_[0]{status} = 'IDLE' });
-    print "$s->{goal} ACHIEVED -> IDLE. Closure report: " . goal_file('closure.md') . "\n";
+    my $gates = $gok ? $gmsg : 'FAILING, accepted with the goal: ' . (split /\n/, $gmsg)[0];
+    if ($partial) {
+        my $r = $o->{reason};
+        unless (defined $r && $r =~ /\w/ && $r ne '1' && ($o->{by} // '') eq 'user') {
+            my %text = map { $_->{id} => $_->{text} } @{ jread(goal_file('criteria.json'))->{criteria} };
+            print "PARTIAL CLOSE NEEDS THE USER (nothing recorded). Accepting it leaves these done-criteria unmet:\n"
+              . join('', map { "- $_: $text{$_}\n" } @{ $v->{open} }) . ($gok ? '' : "gates are failing too: $gates\n")
+              . "Show the user this list. Only if they accept it, run:\n  dt close --accept-partial --reason \"<their reason, in their words>\" --by user\n";
+            $EXIT = 1;
+            return;
+        }
+    }
+    my $rec = end_goal($s, $partial ? 'partial' : 'verified',
+        $partial ? "accepted as partial by the user: $o->{reason}" : 'every criterion passes and the gates are green', $gates);
+    update_state(sub { $_[0]{status} = 'ACHIEVED' }) unless $partial;
+    update_state(sub { @{ $_[0] }{qw(status outcome)} = ('IDLE', $rec) });
+    print +($partial ? "$s->{goal} closed as PARTIAL (open: @{ $v->{open} }) -> IDLE" : "$s->{goal} ACHIEVED -> IDLE")
+        . ". Closure report: " . goal_file('closure.md') . "\n";
 }
 
 sub c_lifecycle {
@@ -746,6 +796,8 @@ sub c_status {
         print "agents spawned: $s->{spawns}/$s->{spawn_cap}   main-thread turns: $s->{main_turns}" . ($s->{turn_cap} ? "/$s->{turn_cap}" : '') . "\n";
         my $c = jread(goal_file('criteria.json'));
         printf "criteria: %d/%d pass\n", scalar(grep { $_->{passes} } @{ $c->{criteria} }), scalar @{ $c->{criteria} };
+        my $oc = $s->{outcome} // {};
+        print "outcome: " . uc($oc->{result}) . " ($oc->{pass}/$oc->{total} pass" . (@{ $oc->{open} } ? "; open: @{ $oc->{open} }" : '') . "): $oc->{why}\n" if $oc->{result};
     }
     print "git grants: " . (join(', ', sort keys %{ $s->{git_grants} }) || 'none') . "\n";
     print "queued goals: " . scalar(@{ $s->{queue} }) . "\n";
@@ -776,7 +828,7 @@ sub c_ledger {
     my (%ev, %tok);
     while (<$h>) {
         my $r = eval { decode_json($_) } or next;
-        $ev{ $r->{event} . ($r->{agent_type} ? " $r->{agent_type}" : '') }++;
+        $ev{ $r->{event} . ($r->{agent_type} ? " $r->{agent_type}" : '') . ($r->{outcome} ? " ($r->{outcome})" : '') }++;
         for my $m (keys %{ $r->{tokens} // {} }) { $tok{$m}{$_} += $r->{tokens}{$m}{$_} for keys %{ $r->{tokens}{$m} } }
     }
     print "events:\n", map { "  $_: $ev{$_}\n" } sort keys %ev;

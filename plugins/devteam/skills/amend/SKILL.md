@@ -13,6 +13,7 @@ The user's instruction beats the Architect, the PM and the hooks. If it is risky
    - *Lane*: `dt goal lane <tiny|standard|large>` (it resets the spawn and turn caps; spawns already used still count). Say the new caps. A tiny goal that outgrows its lane is upgraded this way and announced; never downgrade silently.
    - *Lifecycle*: use the `lifecycle` skill.
    - *Git permissions*: `dt grant set|revoke <integration|task_branches|merges|restore>`.
+   - *Accepting less*: removing or weakening a criterion so the goal can close hides what was not done. If the user is content with what works, leave the criteria and close with `dt close --accept-partial` (see `orchestrate`); it is recorded as partial.
    - *Waive a rule* (for example "scaffolding allowed"): write it under "Waived" in goal.md and tell the reviewer in later briefs. Gates still apply at close unless the user removes that criterion.
    - *Models*: use the `changemodels` skill.
 3. Re-plan only the affected tasks on the board. Do not redo finished work.

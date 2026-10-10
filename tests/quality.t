@@ -105,4 +105,14 @@ like(slurp($paths[1]), qr/PNG 1280,2400/, 'the requested window size reached the
     like(slurp("$PLUGIN/agents/project-manager.md"), qr/`devteam:orchestrate`/, 'and names orchestrate by its qualified name');
 }
 
+# --- outcomes: the PM flow that records a partial close must stay consistent with what dt requires ---
+{
+    my $o = slurp("$PLUGIN/skills/orchestrate/SKILL.md");
+    like($o, qr/dt close --accept-partial --reason "<their words>" --by user/, 'orchestrate shows the exact partial-close command');
+    like($o, qr/Never supply the reason yourself/, 'orchestrate forbids inventing the reason');
+    like($o, qr/cannot be closed as partial/, 'orchestrate says integrity failures cannot close as partial');
+    like($o, qr/\*\*accept as partial\*\*/, 'the close-out question offers accept as partial');
+    like(slurp("$PLUGIN/skills/stop/SKILL.md"), qr/outcome/, 'stop reports the recorded outcome');
+}
+
 done_testing;

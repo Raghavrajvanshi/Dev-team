@@ -42,8 +42,8 @@ like($out, qr/guard\s+PreToolUse\s+agent=0 owned=1 keys=/, 'show lists records c
 hook('guard', { session_id => 'OTHER', hook_event_name => 'PreToolUse', tool_name => 'Agent', tool_input => { subagent_type => 'devteam:qa-engineer' } });
 hook('state-protect', { session_id => 's1', hook_event_name => 'PreToolUse', tool_name => 'Write', tool_input => { file_path => 'x' }, agent_id => 'a1', agent_type => 'devteam:fullstack-engineer' });
 $r = records();
-ok(grep({ ($_->{input}{session_id} // '') eq 'OTHER' && $_->{owned} == 0 } @$r), 'a foreign session is recorded as not owned');
-ok(grep({ ($_->{handler} // '') eq 'state-protect' && $_->{agent} == 1 } @$r), 'a subagent call is recorded as an agent call');
+ok(grep({ ($_->{input}{session_id} // '') eq 'OTHER' && ($_->{owned} // 1) == 0 } @$r), 'a foreign session is recorded as not owned');
+ok(grep({ ($_->{handler} // '') eq 'state-protect' && ($_->{agent} // 0) == 1 } @$r), 'a subagent call is recorded as an agent call');
 
 # --- env switch works without config; hook.sh keeps the trace handler cheap ---
 dt('trace', 'off');

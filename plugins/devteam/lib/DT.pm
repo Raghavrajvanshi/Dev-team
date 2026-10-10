@@ -57,6 +57,7 @@ sub default_state {
         lifecycle => '', original_branch => '', original_sha => '', integration_branch => '',
         adhoc => false, spawns => 0, spawn_cap => 0, main_turns => 0, turn_cap => 0, returns => 0,
         retries => {}, git_grants => {}, queue => [], blocked_reason => '', ledger_offset => 0, updated => '',
+        outcome => {},    # how the last goal ended: { result: verified|partial|failed|blocked, why, pass, total, open, ts }
     };
 }
 

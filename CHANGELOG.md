@@ -2,6 +2,19 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.5] - 2026-10-10
+Honest endings (gap G8): a goal that mostly works can now say so, instead of being stuck or hand-forced shut.
+### Added
+- Four recorded outcomes: `verified`, `partial`, `failed`, `blocked`, written to `closure.md`, the ledger (`goal_closed`) and `dt status`.
+- `dt close --accept-partial`: with no other flags it lists every unmet criterion and records nothing; with `--reason TEXT --by user` it closes as `partial`. It requires at least one passing criterion and at least one open one, and the report keeps the reason and every open criterion.
+- The PM's close-out offers "accept as partial" with the unmet criteria shown (`orchestrate`), and `amend` points to it instead of removing a criterion to make a goal pass.
+- Stopping a confirmed goal records `failed`, or `blocked` when it was waiting on you.
+### Fixed
+- A lock violation, a hand-edited protected file or a moved branch is refused for every outcome. `dt close` and `dt verify` previously re-sealed a tampered `criteria.json` as a side effect, so a second `dt close` could pass; they now refuse until you review and run `dt resync`.
+- A subagent could run `dt criteria confirm --by user` or `dt close` through Bash. The git-guard hook now denies every state-changing `dt` command from a subagent; screenshots, `dt gate run` and read-only commands still work.
+- `dt` options: a boolean flag followed by another `--option` (for example `--full --cwd DIR`) lost its name.
+- `dt verify` no longer prints an uninitialised-value warning when no criterion passes.
+
 ## [0.2.4] - 2026-10-10
 First results from `/devteam:selftest` (gap G1): nine checks confirmed, one defect found and fixed.
 ### Fixed

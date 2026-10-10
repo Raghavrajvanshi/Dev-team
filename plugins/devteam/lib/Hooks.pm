@@ -6,7 +6,8 @@ use warnings;
 use JSON::PP;
 use DT qw(root ddir slurp spit jread ts ledger_add state_read state_write update_state config_read check_seal seal
   goal_dir git_out run_gates usage_since locked);
-use DT::Git qw(classify);
+use DT::Git qw(classify segments);
+use Text::ParseWords qw(shellwords);
 use Exporter 'import';
 our @EXPORT_OK = qw(dispatch);
 
@@ -125,9 +126,31 @@ sub state_protect {
       if exists $c->{locks}{$rel} && ($in->{agent_type} // '') ne 'devteam:qa-engineer';
 }
 
+# A subagent may read dt's state and take screenshots. Anything that changes state, confirms a criterion
+# or closes a goal carries the user's authority and is the PM's alone, so a subagent can never confirm
+# "by user" or close a goal (any outcome) on its own.
+my %DT_AGENT_OK = map { $_ => 1 } ('shot', 'status', 'who', 'team', 'ledger', 'knowledge', 'gate run', 'criteria show',
+    'models show', 'models get', 'grant show', 'state show', 'state get', 'lifecycle list', 'lifecycle suggest', 'queue show');
+sub dt_authority {
+    my ($cmd) = @_;
+    return unless $cmd =~ /\bdt\b/;
+    return 'dt cannot be checked inside a shell construct; run it as a plain command' if $cmd =~ /(?:\$\(|`|<\(|\beval\b|\b(?:ba|z|da)?sh\s+-c\b|\bxargs\b|\bsource\b)/;
+    for my $seg (segments($cmd)) {
+        my @w = eval { shellwords($seg) } or next;
+        shift @w while @w && ($w[0] =~ /^[A-Za-z_]\w*=/ || $w[0] =~ m{^(?:sudo|command|env|nice|time|perl)$});
+        next unless @w && $w[0] =~ m{(?:^|/)dt$};
+        my ($sub, $arg) = grep { !/^-/ } @w[1 .. $#w];
+        next unless defined $sub;
+        return "'dt $sub' carries the user's authority and is the PM's to run; reply NEEDS_CONTEXT so the PM can ask"
+          unless $DT_AGENT_OK{$sub} || $DT_AGENT_OK{ "$sub " . ($arg // '') };
+    }
+    return;
+}
+
 sub git_guard {
     my ($in, $st, $agent) = @_;
     return unless $agent && ($in->{tool_name} // '') eq 'Bash';
+    if (my $why = dt_authority($in->{tool_input}{command} // '')) { deny($why) }
     my $c = classify($in->{tool_input}{command} // '');
     my $tier = $c->{tier};
     return if $tier eq 'none' || $tier eq 'read';

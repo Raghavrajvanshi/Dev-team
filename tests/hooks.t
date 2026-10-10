@@ -91,6 +91,22 @@ is(decision((git('git checkout main'))[1]), 'deny', 'agents cannot switch branch
 is(decision((git('git commit -m x', role => 'devteam:architect'))[1]), 'deny', 'architect still read-only');
 is((hook('git-guard', { session_id => 's1', tool_name => 'Bash', tool_input => { command => 'git push' } }))[1], '', 'the main thread is not governed by the hook');
 
+# --- dt authority: a subagent may read state and take screenshots, nothing that carries the user's authority ---
+for my $ok ('dt shot --serve site index.html --widths 390,1280', 'dt gate run', 'dt criteria show', 'dt status', 'dt who architect',
+    'cd site && perl /x/plugins/devteam/bin/dt shot --serve . index.html', 'grep -r "dt" notes.txt') {
+    is((git($ok))[1], '', "subagent may run: $ok");
+}
+for my $no ('dt close', 'dt close --accept-partial --reason x --by user', 'dt criteria confirm C1 --by user', 'dt state transition VERIFYING',
+    'dt goal confirm --lane tiny --lifecycle direct', 'dt grant set task_branches', 'dt resync', 'dt criteria edit C1 --check true',
+    'perl /x/plugins/devteam/bin/dt close', 'cd /tmp && dt close', 'FOO=1 /opt/p/bin/dt criteria confirm C2 --by user',
+    'dt status; dt close', 'dt models set architect --model haiku') {
+    is(decision((git($no))[1]), 'deny', "subagent cannot run: $no");
+}
+like(reason((git('dt close'))[1]), qr/'dt close' carries the user's authority/, 'the refusal says why');
+is(decision((git('bash -c "dt close"'))[1]), 'deny', 'dt inside a shell construct is denied as unverifiable');
+is(decision((git('dt $(echo close)', role => 'devteam:reviewer'))[1]), 'deny', 'every role is held to it');
+is((hook('git-guard', { session_id => 's1', tool_name => 'Bash', tool_input => { command => 'dt close' } }))[1], '', 'the main thread may run dt close');
+
 # --- route ---
 sub route { hook('route', { session_id => 's1', hook_event_name => 'UserPromptSubmit', prompt => $_[0] }) }
 dt('state', 'transition', 'VERIFYING');
