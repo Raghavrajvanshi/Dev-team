@@ -2,6 +2,12 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.2] - 2026-10-10
+### Added
+- CI (`.github/workflows/ci.yml`): the offline test suite on Ubuntu and macOS, and `claude plugin validate --strict` for the marketplace, plugin, skills and agents, on every push to `main` and every pull request. README badge added.
+### Changed
+- `scripts/release` now refuses a commit whose CI run is missing or not green, and waits for a run that is still in progress.
+
 ## [0.2.1] - 2026-10-10
 ### Added
 - Workflow diagrams in the README and `docs/images/`: the end-to-end flow with the three points where you decide, the goal state machine, the team and enforcement architecture, and the git permission tiers. SVG sources plus 2x PNG exports.

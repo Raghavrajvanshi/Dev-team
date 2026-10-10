@@ -36,6 +36,20 @@ notes=$(awk -v v="$version" '
   on { print }' CHANGELOG.md)
 [ -n "$(printf '%s' "$notes" | tr -d '[:space:]')" ] || die "CHANGELOG.md has no entry for $version"
 
+# CI must be green for the exact commit (only once the repo has a workflow at that commit).
+if git cat-file -e "$sha:.github/workflows/ci.yml" 2>/dev/null; then
+  run=$(gh run list --workflow ci.yml --commit "$sha" --limit 1 --json databaseId,status,conclusion \
+    --jq '.[0] | "\(.databaseId) \(.status) \(.conclusion)"' 2>/dev/null || true)
+  [ -n "$run" ] && [ "$run" != "null null null" ] || die "no CI run for $short yet: push it and wait for CI"
+  set -- $run
+  if [ "$2" != completed ]; then
+    echo "release: CI is $2 for $short, waiting..." >&2
+    gh run watch "$1" --exit-status >/dev/null 2>&1 || die "CI failed for $short"
+  elif [ "$3" != success ]; then
+    die "CI is $3 for $short"
+  fi
+fi
+
 verification="Not re-run: this release was created after the fact from commit \`$short\`."
 if [ "$sha" = "$(git rev-parse HEAD)" ]; then
   [ -z "$(git status --porcelain)" ] || die "working tree is not clean"

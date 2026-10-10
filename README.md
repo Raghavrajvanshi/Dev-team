@@ -1,5 +1,7 @@
 # Dev-team
 
+[![CI](https://github.com/Raghavrajvanshi/Dev-team/actions/workflows/ci.yml/badge.svg)](https://github.com/Raghavrajvanshi/Dev-team/actions/workflows/ci.yml)
+
 A goal-gated, token-lean software development team for Claude Code, packaged as the plugin **`devteam`**. It works in any git project.
 
 - A **Goal Keeper** asks you to define the goal first. Nothing is built until you confirm it, and the team stops when the done-criteria are verified by script.
@@ -54,7 +56,7 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.2.1  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.2  enabled
 ```
 
 In a session, typing `/devteam:` should list the commands below.
@@ -193,7 +195,7 @@ Every published change is a new version and a GitHub release ([releases](https:/
 
 1. Bump `version` in `plugins/devteam/.claude-plugin/plugin.json` and add a `## [x.y.z]` entry to `CHANGELOG.md`.
 2. Commit and push to `main`.
-3. Run `scripts/release`. It refuses unless the commit is on `origin/main`, the version is new and has a changelog entry, and the tree is clean, `prove tests/` passes and `claude plugin validate --strict` is clean. The release notes are the changelog entry plus the commit, test count and install/update commands.
+3. Run `scripts/release`. It refuses unless CI is green for the commit (it waits for a running CI), and the commit is on `origin/main`, the version is new and has a changelog entry, and the tree is clean, `prove tests/` passes and `claude plugin validate --strict` is clean. The release notes are the changelog entry plus the commit, test count and install/update commands.
 
 Layout: `plugins/devteam/{bin/dt, lib/, hooks/, skills/, agents/, lifecycles/, templates/}`. The full design and the reasoning behind it: [docs/DESIGN.md](docs/DESIGN.md).
 
