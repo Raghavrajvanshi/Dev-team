@@ -5,12 +5,12 @@
 A goal-gated, token-lean software development team for Claude Code, packaged as the plugin **`devteam`**. It works in any git project.
 
 - A **Goal Keeper** asks you to define the goal first. Nothing is built until you confirm it, and the team stops when the done-criteria are verified by script.
-- A **PM**, an **Architect**, engineers, **QA** and a **Reviewer** are started one at a time, only when a step needs them.
+- A **PM**, an **Architect**, engineers, **QA**, a **Reviewer** and, when a change is risky, a **Security Engineer** are started one at a time, only when a step needs them.
 - The PM suggests the best-fit **lifecycle** (Agile Scrum/Kanban, Waterfall, and more) and you choose.
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (560) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (611) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -138,11 +138,12 @@ Every role is a person with a title. **Names are drawn at random when the team i
 | Full-Stack Engineer | `fullstack-engineer` | agent |
 | QA Engineer | `qa-engineer` | agent |
 | Staff Engineer (code review) | `reviewer` | agent |
+| Security Engineer | `security-engineer` | agent, read-only; started when `dt risk` finds a trigger |
 | Acceptance Verifier | `goal-verifier` | agent |
 | Research Analyst | `researcher` | agent |
 | UX Designer | `ux-designer` | agent |
 
-Planned: Backend, Frontend, Mobile, DevOps, Security and Technical Writer roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
+Planned: Backend, Frontend, Mobile, DevOps and Technical Writer roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
 
 ### How the team thinks
 
@@ -154,6 +155,7 @@ Passing checks is not the same as good work, so the process is built around qual
 4. **Polish until it passes.** Anything under 4 of 5 goes back to an engineer with concrete fixes, for up to two rounds; if it still fails you see the scores and screenshots.
 5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
+7. **Risky changes get a security look.** `dt risk` (a script, no model call) checks the planned files and the finished diff against the triggers in [`plugins/devteam/risk.tsv`](plugins/devteam/risk.tsv): authentication, payments, secrets, uploads and webhooks, pipelines, dependency manifests and migrations by path, and by added line `eval` and shell calls, unsafe deserialization, string-built SQL, `innerHTML` and disabled TLS checks. When one fires, or the goal's risk is high or regulated, the read-only Security Engineer reviews the design for threats (STRIDE) before code and the diff for exploitable flaws (OWASP Top 10) after it, and reports only what an attacker can reach. A match is a reason to look, not a finding; edit `risk.tsv` to tune it. This complements, and does not replace, Claude Code's own `security-guidance` plugin and `/security-review`, and the scanners in your CI.
 
 ### Lanes and lifecycles
 
@@ -177,7 +179,7 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 
 ## Cost
 
-`claude plugin details devteam` reports the plugin's footprint: about **600 tokens added to every session**; hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.2k, `orchestrate` about 1.6k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
+`claude plugin details devteam` reports the plugin's footprint: about **930 tokens added to every session** (v0.2.8; each agent adds its one-line description, about 30 to 40); hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.8k, `orchestrate` about 3.5k, a Security Engineer spawn about 1.1k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
 
 ## Troubleshooting
 
@@ -191,7 +193,7 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 
 ## Check your install: the self-test
 
-Several behaviours (how Claude Code passes agent ids to hooks, whether plugin skills preload into agents, the model override on spawn) could only be assumed when the plugin was written. `/devteam:selftest` settles them from evidence. Run it in a **scratch git repo**: it starts three cheap probe agents and attempts a few actions that must be refused, then prints a checklist.
+Several behaviours (how Claude Code passes agent ids to hooks, whether plugin skills preload into agents, the model override on spawn) could only be assumed when the plugin was written. `/devteam:selftest` settles them from evidence. Run it in a **scratch git repo**: it starts four cheap probe agents and attempts a few actions that must be refused, then prints a checklist.
 
 ```
 /devteam:selftest
@@ -213,12 +215,12 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Still unverified live:** PM mode (`claude --agent devteam:project-manager`), the finish gate actually blocking a `SubagentStop`, and the v0.2 flow end to end on a real user-facing goal (researcher, designer, screenshots, polish loop).
 
-**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Security/UX/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. macOS and Linux only.
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has been tested offline only; `/devteam:selftest` has a probe for it that has not been run yet. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 560 tests
+prove tests/                                        # 611 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

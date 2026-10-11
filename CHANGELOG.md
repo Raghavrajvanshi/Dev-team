@@ -2,6 +2,20 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.8] - 2026-10-12
+Security Engineer (gap G9, first role): risky changes get a read-only security review, decided by a script.
+### Added
+- `security-engineer` agent (`devteam:security-engineer`): read-only (no `Write` or `Edit`), two modes. `design` applies STRIDE to the trust boundaries in `design.md` and returns at most six testable requirements. `diff` reviews only what the change adds against the OWASP Top 10 categories it can reach, checks a new or changed dependency's publisher and advisories, and reports only findings it can state as attacker, boundary, impact and why controls fail. A committed credential is `STOP` and is never printed. Its reply says what it did not read.
+- `dt risk` and `plugins/devteam/risk.tsv`: `dt risk planned <path>...` checks planned file paths, and `dt risk [diff [--base REF]]` checks the finished change (paths, and the lines the change adds; new files whole) against editable triggers: authentication, payments, crypto, uploads and webhooks, secrets, pipelines, dependency manifests, migrations, `eval` and shell calls, unsafe deserialization, DOM injection, string-built SQL, disabled TLS checks. It makes no model call. A match means "look", never "finding".
+- The PM flow (`orchestrate`) spawns the Security Engineer in `design` mode after the Architect and in `diff` mode before the Reviewer when `dt risk` finds a trigger or the goal's risk is high or regulated; a Reviewer's `RISKY: yes` also triggers it; `STOP` is an exception stop; a tiny-lane change that trips a trigger is offered the standard lane.
+- `/devteam:selftest` probe D and the manual check `security-engineer-live` (no write tools, cannot commit).
+- 51 tests: `tests/risk.t` and a hook test that the role cannot commit even with the grant on a devteam branch.
+### Changed
+- README token figures were stale (about 600 always-on, `orchestrate` 1.6k); measured now with `claude plugin details`: 899 before this change, 932 after (the new agent's description), `orchestrate` 3.2k to 3.5k when loaded, about 1.1k per Security Engineer spawn.
+### Notes
+- Tested offline only. The agent has not been run live and has no eval case yet (that needs G3). DevOps, the next role in G9, is not in this release.
+- Design sources are in `docs/DESIGN.md` (Claude Code's `security-guidance` plugin and `/security-review`, shinpr/claude-code-workflows, metaswarm, gstack).
+
 ## [0.2.7] - 2026-10-12
 ### Fixed
 - Token accounting overstated usage about threefold. Claude Code writes an assistant message's usage once per content block (a real session had 1,054 usage lines for 393 messages; a subagent had 43 for 11) and the ledger counted every line. It also counted history a forked session inherits, and the first Stop after engaging swept the whole transcript in. Usage is now counted once per message and request, only for this session, from a baseline `dt engage` takes. Checked on a real 19 MB transcript against an independent implementation: identical figures. Totals recorded by earlier versions stay inflated.

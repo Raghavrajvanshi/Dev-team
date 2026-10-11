@@ -1,0 +1,17 @@
+# Triggers for a security review (read by `dt risk`). Tab-separated: kind, where, pattern (Perl regex, case-insensitive).
+# where: path = the path of a changed or planned file; line = a line the change adds. A match only means "a security
+# engineer should look"; it is not a finding. Edit this file to tune what triggers a review: no code change is needed.
+auth	path	(?<![a-z])(?:auth|authn|authz|authenticat\w*|authoriz\w*|login|logout|signin|signup|sessions?|oauth\w*|sso|saml|passw\w*|credentials?|permissions?|rbac|acl|jwt|tokens?)(?![a-z])
+payment	path	(?<![a-z])(?:payments?|billing|checkout|invoices?|stripe|paypal|subscriptions?|wallet|refunds?)(?![a-z])
+crypto	path	(?<![a-z])(?:crypto\w*|cipher\w*|encrypt\w*|decrypt\w*|signing|keystore)(?![a-z])
+inbound	path	(?<![a-z])(?:uploads?|webhooks?)(?![a-z])
+secrets-file	path	(?:^|/)\.env(?:\.|$)|\.(?:pem|key|p12|pfx)$|id_rsa|(?:^|/)(?:credentials?|secrets?)(?:\.|/|$)|(?:^|/)\.(?:npmrc|netrc)$
+pipeline	path	^\.github/workflows/|^\.gitlab-ci|(?:^|/)Jenkinsfile$|(?:^|/)Dockerfile|docker-compose|^\.circleci/|\.tf$|(?:^|/)(?:terraform|k8s|kubernetes|helm)/
+dependency	path	(?:^|/)(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|requirements[\w.-]*\.txt|Pipfile(?:\.lock)?|poetry\.lock|pyproject\.toml|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|Gemfile(?:\.lock)?|composer\.(?:json|lock)|pom\.xml|build\.gradle(?:\.kts)?|packages\.config|[\w.-]+\.csproj|mix\.exs|cpanfile)$
+migration	path	(?:^|/)migrations?/|\.sql$
+secret	line	-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bsk_live_[0-9A-Za-z]{10,}|\bghp_[0-9A-Za-z]{30,}|\bxox[baprs]-[0-9A-Za-z-]{10,}|(?:password|passwd|secret|api[_-]?key|token)\w*\s*[:=]\s*["'][^"'\s]{8,}["']
+dynamic-exec	line	\beval\s*\(|\bexec(?:Sync)?\s*\(|\bchild_process\b|\bsubprocess\.(?:run|call|Popen|check_output)\b|\bos\.system\b|\bshell_exec\b|\bProcessBuilder\b|\bpopen\s*\(|\bsystem\s*\(
+deserialize	line	\bpickle\.loads?\b|\byaml\.load\s*\(|\bunserialize\s*\(|\bObjectInputStream\b|\bMarshal\.load\b|\bBinaryFormatter\b
+dom-injection	line	\binnerHTML\b|\bouterHTML\b|dangerouslySetInnerHTML|document\.write\s*\(|\bv-html\b
+sql-concat	line	\b(?:select|insert|update|delete)\b.*\b(?:from|into|set|where)\b.*(?:\$\{|\+\s*\w|["']\s*\+|%s|\.format\s*\(|\bf["'])
+tls-off	line	verify\s*=\s*False|rejectUnauthorized\s*:\s*false|InsecureSkipVerify\s*:\s*true|CURLOPT_SSL_VERIFYPEER\W+(?:false|0)|NODE_TLS_REJECT_UNAUTHORIZED|--insecure\b

@@ -89,6 +89,8 @@ sh('git switch -q -c devteam/G-001');
 is((git('git add -A && git commit -m x'))[1], '', 'granted engineer may commit on a devteam branch');
 is(decision((git('git checkout main'))[1]), 'deny', 'agents cannot switch branches');
 is(decision((git('git commit -m x', role => 'devteam:architect'))[1]), 'deny', 'architect still read-only');
+is(decision((git('git commit -m x', role => 'devteam:security-engineer'))[1]), 'deny', 'the security engineer is read-only too, even with the grant and a devteam branch');
+is((git('git diff main && git log -1', role => 'devteam:security-engineer'))[1], '', 'but it may read the diff and the log');
 is((hook('git-guard', { session_id => 's1', tool_name => 'Bash', tool_input => { command => 'git push' } }))[1], '', 'the main thread is not governed by the hook');
 
 # --- dt authority: a subagent may read state and take screenshots, nothing that carries the user's authority ---
