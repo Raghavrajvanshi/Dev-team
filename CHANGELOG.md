@@ -2,6 +2,14 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.7] - 2026-10-12
+### Fixed
+- Token accounting overstated usage about threefold. Claude Code writes an assistant message's usage once per content block (a real session had 1,054 usage lines for 393 messages; a subagent had 43 for 11) and the ledger counted every line. It also counted history a forked session inherits, and the first Stop after engaging swept the whole transcript in. Usage is now counted once per message and request, only for this session, from a baseline `dt engage` takes. Checked on a real 19 MB transcript against an independent implementation: identical figures. Totals recorded by earlier versions stay inflated.
+### Changed
+- The tests no longer read the machine's real Claude session registry or transcripts.
+### Notes
+- Found while looking at gap G11 (cost report), which the owner dropped; no report or budget was built.
+
 ## [0.2.6] - 2026-10-10
 Concurrent sessions (gap G16): another Claude session in the same repository no longer goes unnoticed.
 ### Added

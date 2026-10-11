@@ -13,6 +13,7 @@ sub new_repo {
     $ENV{DT_ROOT} = $REPO;
     $ENV{DT_CLAUDE_VERSION} = '2.1.295';
     delete $ENV{CLAUDE_PROJECT_DIR};
+    $ENV{DT_CLAUDE_DIR} = tempdir(CLEANUP => 1);    # never read the real session registry or transcripts
     system("cd $REPO && git init -q -b main && git config user.email t\@t.t && git config user.name t && echo hi > a.txt && git add a.txt && git commit -q -m init");
     return $REPO;
 }

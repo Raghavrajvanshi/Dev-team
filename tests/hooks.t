@@ -157,15 +157,21 @@ like($out, qr/devteam digest.*status=ACTIVE goal=G-002/s, 'compact re-injects a 
 is($out, '', 'but not on a normal start');
 
 # --- ledger ---
-open my $t, '>', "$REPO/../tr.jsonl" or die;
-print $t encode_json({ message => { model => 'claude-sonnet-x', usage => { input_tokens => 10, output_tokens => 5, cache_read_input_tokens => 100 } } }), "\n";
-print $t encode_json({ type => 'user' }), "\n";
-close $t;
-hook('ledger', { session_id => 's1', hook_event_name => 'Stop', transcript_path => "$REPO/../tr.jsonl" });
+# (the accounting itself is covered in usage.t; here, that the hook wires it up)
+my $tr = "$REPO/../tr.jsonl";
+sub tr_append { open my $h, '>>', $tr or die; print $h @_; close $h }
+sub stop_main { hook('ledger', { session_id => 's1', hook_event_name => 'Stop', transcript_path => $tr }) }
+tr_append(encode_json({ message => { id => 'm0', model => 'claude-sonnet-x', usage => { input_tokens => 999, output_tokens => 999 } } }), "\n");
+stop_main();    # no baseline yet: what is already in the transcript is not the team's
 ($rc, $out) = dt('ledger');
 like($out, qr/main_stop: 1/, 'ledger counts the stop');
+unlike($out, qr/claude-sonnet-x/, 'history before the first stop is not counted');
+tr_append(encode_json({ message => { id => 'm1', model => 'claude-sonnet-x', usage => { input_tokens => 10, output_tokens => 5, cache_read_input_tokens => 100 } } }), "\n",
+    encode_json({ type => 'user' }), "\n");
+stop_main();
+($rc, $out) = dt('ledger');
 like($out, qr/claude-sonnet-x: in=10 out=5 cache_read=100/, 'ledger sums tokens by model');
-hook('ledger', { session_id => 's1', hook_event_name => 'Stop', transcript_path => "$REPO/../tr.jsonl" });
+stop_main();
 ($rc, $out) = dt('ledger');
 like($out, qr/claude-sonnet-x: in=10 out=5/, 'a second read does not double-count');
 

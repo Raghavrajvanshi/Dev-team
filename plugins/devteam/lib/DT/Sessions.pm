@@ -10,7 +10,7 @@ use warnings;
 use Cwd qw(abs_path);
 use DT qw(root ddir jread jwrite slurp spit locked config_read);
 use Exporter 'import';
-our @EXPORT_OK = qw(live_others holder_status lease_write lease_touch note_other foreign_writes ack acked probe);
+our @EXPORT_OK = qw(live_others holder_status lease_write lease_touch note_other foreign_writes ack acked probe transcript_file);
 
 sub ttl        { $ENV{DT_LIVE_SECS} // config_read()->{sessions}{live_secs} // 1800 }
 sub claude_dir { $ENV{DT_CLAUDE_DIR} // $ENV{CLAUDE_CONFIG_DIR} // ($ENV{HOME} // '') . '/.claude' }
@@ -48,6 +48,7 @@ sub transcript_dir {
     (my $slug = real(root())) =~ s/[^A-Za-z0-9]/-/g;
     return claude_dir() . "/projects/$slug";
 }
+sub transcript_file { transcript_dir() . "/$_[0].jsonl" }
 sub transcripts {
     my ($self) = @_;
     my $dir = transcript_dir();

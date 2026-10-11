@@ -231,28 +231,39 @@ sub run_gates {
     return (1, $ran ? $notes : 'gates not configured');
 }
 
-# Token usage appended to a transcript since byte offset $off. Best effort: tolerates unknown line shapes.
+# Token usage appended to a transcript since byte offset $off. Claude Code writes an assistant message's usage once
+# per content block, so lines are counted once per (message id, request id); with session => ID, lines from another
+# session (history a fork inherited) are skipped; after => KEY ignores the message the previous read ended on.
+# Returns (\%tokens_by_model, new_offset, last_key). Best effort: tolerates unknown line shapes.
 sub usage_since {
-    my ($path, $off) = @_;
+    my ($path, $off, %o) = @_;
     $off //= 0;
-    return ({}, $off) unless defined $path && -f $path;
-    open my $h, '<:raw', $path or return ({}, $off);
+    return ({}, $off, $o{after}) unless defined $path && -f $path;
+    open my $h, '<:raw', $path or return ({}, $off, $o{after});
     $off = 0 if $off > -s $path;
     seek $h, $off, 0;
-    my %t;
+    my (%t, %seen, $last);
+    $seen{ $o{after} } = 1 if length($o{after} // '');
     while (my $l = <$h>) {
         last unless $l =~ /\n\z/;
         $off += length $l;
         next unless $l =~ /"usage"/;
-        my $u = eval { decode_json($l)->{message} } or next;
-        my $use = $u->{usage} or next;
-        my $m = $u->{model} // 'unknown';
-        $t{$m}{input} += $use->{input_tokens} // 0;
-        $t{$m}{output} += $use->{output_tokens} // 0;
-        $t{$m}{cache_read} += $use->{cache_read_input_tokens} // 0;
-        $t{$m}{cache_write} += $use->{cache_creation_input_tokens} // 0;
+        my $d = eval { decode_json($l) } or next;
+        my $m = ref $d eq 'HASH' ? $d->{message} : undef;
+        my $use = ref $m eq 'HASH' ? $m->{usage} : undef;
+        next unless ref $use eq 'HASH';
+        next if length($o{session} // '') && length($d->{sessionId} // '') && $d->{sessionId} ne $o{session};
+        if (defined $m->{id}) {
+            $last = "$m->{id}:" . ($d->{requestId} // '');
+            next if $seen{$last}++;
+        }
+        my $mod = $m->{model} // 'unknown';
+        $t{$mod}{input} += $use->{input_tokens} // 0;
+        $t{$mod}{output} += $use->{output_tokens} // 0;
+        $t{$mod}{cache_read} += $use->{cache_read_input_tokens} // 0;
+        $t{$mod}{cache_write} += $use->{cache_creation_input_tokens} // 0;
     }
-    return (\%t, $off);
+    return (\%t, $off, $last // $o{after});
 }
 
 1;

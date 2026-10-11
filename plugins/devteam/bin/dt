@@ -9,7 +9,7 @@ use File::Path qw(make_path);
 use DT qw(root ddir slurp spit jread jwrite ts true false default_state default_config state_read state_write
   config_read config_write goal_dir seal check_seal sha_file git_out tree_key run_cmd ledger_add
   locked update_state run_gates);
-use DT::Sessions qw(live_others holder_status lease_write foreign_writes ack acked probe);
+use DT::Sessions qw(live_others holder_status lease_write foreign_writes ack acked probe transcript_file);
 use DT::Scope ();
 
 my $MIN_CLAUDE = '2.1.295';
@@ -423,6 +423,9 @@ sub c_engage {
         @$s{qw(engaged owner_session)} = (true, $sid);
         state_write($s);
         lease_write($sid);
+        # Cost accounting starts here: history already in this session's transcript is not the team's.
+        my ($tf, $of) = (transcript_file($sid), ddir() . "/ledger.offset.main-$sid");
+        spit($of, (-s $tf) . "\t\n") if -f $tf && !-f $of;
         ledger_add({ event => 'engage', session => $sid, took_over => $held && $held->{live} ? $holder : '', others => scalar @others });
         if ($held && !$held->{live}) { print 'note: ' . substr($holder, 0, 8) . " held the team earlier ($held->{why}); this session holds it now\n" }
         return 1;

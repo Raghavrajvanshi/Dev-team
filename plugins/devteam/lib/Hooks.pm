@@ -244,10 +244,14 @@ sub ledger {
     delete $r{$_} for grep { !defined $r{$_} } keys %r;
     my $path = $agent ? $in->{agent_transcript_path} : $in->{transcript_path};
     if ($path) {
-        my $of = ddir() . '/ledger.offset.' . ($agent ? "agent-$in->{agent_id}" : 'main');
-        my ($t, $new) = usage_since($path, (slurp($of) // 0) + 0);
+        # A subagent's transcript is its own and counted from the start. The main transcript is counted from the
+        # baseline `dt engage` took (history before the team existed is not the team's), and only its own session.
+        my $of = ddir() . '/ledger.offset.' . ($agent ? "agent-$in->{agent_id}" : "main-$in->{session_id}");
+        my ($off, $key) = (slurp($of) // '') =~ /^(\d+)(?:\t(\S*))?/;
+        $off = -s $path if !defined $off && !$agent;
+        my ($t, $new, $last) = usage_since($path, $off // 0, session => $agent ? undef : $in->{session_id}, after => $key);
         $r{tokens} = $t if %$t;
-        spit($of, $new);
+        spit($of, "$new\t" . ($last // '') . "\n");
     }
     ledger_add(\%r);
 }
