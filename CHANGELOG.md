@@ -9,7 +9,7 @@ Security Engineer (gap G9, first role): risky changes get a read-only security r
 - `dt risk` and `plugins/devteam/risk.tsv`: `dt risk planned <path>...` checks planned file paths, and `dt risk [diff [--base REF]]` checks the finished change (paths, and the lines the change adds; new files whole) against editable triggers: authentication, payments, crypto, uploads and webhooks, secrets, pipelines, dependency manifests, migrations, `eval` and shell calls, unsafe deserialization, DOM injection, string-built SQL, disabled TLS checks. It makes no model call. A match means "look", never "finding".
 - The PM flow (`orchestrate`) spawns the Security Engineer in `design` mode after the Architect and in `diff` mode before the Reviewer when `dt risk` finds a trigger or the goal's risk is high or regulated; a Reviewer's `RISKY: yes` also triggers it; `STOP` is an exception stop; a tiny-lane change that trips a trigger is offered the standard lane.
 - `/devteam:selftest` probe D and the manual check `security-engineer-live` (no write tools, cannot commit).
-- 51 tests: `tests/risk.t` and a hook test that the role cannot commit even with the grant on a devteam branch.
+- 53 tests: `tests/risk.t` and a hook test that the role cannot commit even with the grant on a devteam branch.
 ### Changed
 - README token figures were stale (about 600 always-on, `orchestrate` 1.6k); measured now with `claude plugin details`: 899 before this change, 932 after (the new agent's description), `orchestrate` 3.2k to 3.5k when loaded, about 1.1k per Security Engineer spawn.
 ### Notes
