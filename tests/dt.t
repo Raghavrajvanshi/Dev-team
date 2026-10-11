@@ -51,7 +51,7 @@ isnt($rc, 0, 'rejects unknown lifecycle');
 is($rc, 0, 'confirm') or diag $out;
 my $s = state();
 is($s->{status}, 'ACTIVE', 'ACTIVE after confirm');
-is($s->{spawn_cap}, 7, 'standard spawn cap');
+is($s->{spawn_cap}, 10, 'standard spawn cap');
 ok($s->{git_grants}{integration} && $s->{git_grants}{restore}, 'grants recorded');
 
 # --- branch handling ---

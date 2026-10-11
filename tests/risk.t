@@ -70,6 +70,16 @@ sh('mkdir -p billing && echo ok > billing/charge.js && git add billing && git co
 like($out, qr/^  payment: billing\/charge\.js$/m, 'committed work since the goal started is seen') or diag $out;
 unlike($out, qr/auth\/before/, 'and what was there before it is not');
 
+# found live: the first real login function (users.py) tripped no trigger at all
+new_repo();
+dt('init');
+sh('printf "import hashlib\\nimport hmac\\nimport secrets\\n\\n\\ndef login(username, password):\\n    ok = hmac.compare_digest(hashlib.scrypt(password, salt=s, n=2, r=8, p=1), d)\\n    return secrets.token_urlsafe(32) if ok else None\\n" > users.py');
+sh('printf "def tokenize(text):\\n    return text.split()\\n\\n@login_required\\ndef authority_list():\\n    import hmac\\n    return []\\n" > text.py');
+($rc, $out) = dt('risk');
+like($out, qr/^  auth-code: users\.py:6$/m, 'a login function is named by its definition line') or diag $out;
+like($out, qr/^  crypto-api: users\.py:7$/m, 'and the key-derivation and comparison calls by the first line that uses one');
+unlike($out, qr/text\.py/, 'tokenize, login_required, authority_list and a bare import hmac are not triggers');
+
 # planned files: paths only, before any code exists
 ($rc, $out) = dt('risk', 'planned', 'src/payments/charge.ts', 'README.md', '.github/workflows/ci.yml');
 like($out, qr/^risk: 2 trigger\(s\) in 3 planned file\(s\)/, 'planned paths are checked by name');
@@ -113,6 +123,8 @@ like($o, qr/`security-engineer` in `design` mode/, 'in design mode, after the Ar
 like($o, qr/`security-engineer` in `diff` mode first/, 'and in diff mode, before the Reviewer');
 like($o, qr/offer `dt goal lane standard`, so a Security Engineer can review/, 'the tiny lane offers to move up rather than skip the review');
 like($o, qr/`security-engineer` returns `STOP`/, 'a STOP from it is an exception stop');
+like($o, qr/`run_in_background: false`/, 'agents are spawned synchronously: the tool otherwise returns at once (found live)');
+like($o, qr/shorten research, design, security review, QA verification, critique or polish/, 'QA verification is never skipped to stay under a cap (found live)');
 like($o, qr/RISKY: yes/, 'a risky review also triggers it');
 
 done_testing;

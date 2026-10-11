@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (613) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (622) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -195,6 +195,8 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 
 Several behaviours (how Claude Code passes agent ids to hooks, whether plugin skills preload into agents, the model override on spawn) could only be assumed when the plugin was written. `/devteam:selftest` settles them from evidence. Run it in a **scratch git repo**: it starts four cheap probe agents and attempts a few actions that must be refused, then prints a checklist.
 
+To check a new version without updating your installed copy, run the self-test headlessly from a clean shell (no older `dt` earlier on `PATH`) in a throwaway repo: `claude -p "/devteam:selftest" --plugin-dir <this repo>/plugins/devteam --permission-mode bypassPermissions --strict-mcp-config` (`--settings '{"enabledPlugins":{"devteam@devteam-marketplace":false}}'` switches the installed copy off). Bypass mode is only for that scratch directory: it removes every prompt, so the denials you see are the plugin's hooks.
+
 ```
 /devteam:selftest
 dt trace report          # the checklist: confirmed, refuted, suspect or unseen for each assumption
@@ -211,16 +213,18 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in live sessions** (the first real run, and `/devteam:selftest`, 10 October 2026): the plugin loads from the marketplace; `dt` resolves from the plugin's `bin/`; the `Agent` tool input carries `subagent_type`, `model`, `effort` and `isolation`; `agent_id` and `agent_type` (`devteam:<role>`) reach hooks on subagent calls; subagent writes to protected state and subagent pushes and commits are denied; the spawn guard refuses an untyped agent and a worktree spawn without a grant; the `model` passed on spawn is the model the agent runs as; `craft` and `design-quality` preload into agents; subagent token usage reaches the ledger.
 
-**Found and fixed by the self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
+**Confirmed in a second live pass** (12 October 2026, headless, Claude Code 2.1.296, the current plugin loaded with `--plugin-dir`, scratch repositories): the self-test (13 checks confirmed, none refuted); the finish gate blocks a `SubagentStop` and the agent carries on; a second session's events reach the hooks and its writes are attributed to it; `SessionStart` reports `startup`, `resume` and `compact`; PM mode (`claude --agent devteam:project-manager`) runs setup, onboarding, intake, orchestration and close; and a standard goal with a Security Engineer design pass and diff pass closed `verified` (5 of 5 criteria, 7 agents, about $1.50 at list prices). It also found four defects, fixed in 0.2.9: the finish gate blocked the QA Engineer's red-by-design acceptance tests, a risky goal overran the standard spawn cap, `dt risk` missed a login function, and a stale `dt` could pass the self-test.
 
-**Still unverified live:** PM mode (`claude --agent devteam:project-manager`), the finish gate actually blocking a `SubagentStop`, and the v0.2 flow end to end on a real user-facing goal (researcher, designer, screenshots, polish loop).
+**Found and fixed by the first self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
 
-**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has been tested offline only; `/devteam:selftest` has a probe for it that has not been run yet. macOS and Linux only.
+**Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has real findings (both its passes came back CLEAR).
+
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has run live twice (see above), but only on a clean diff. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 613 tests
+prove tests/                                        # 622 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

@@ -44,10 +44,10 @@ is((spawn(type => 'Explore'))[1], '', 'ACTIVE: Explore is allowed and not counte
 is(state()->{spawns}, 1, 'Explore did not count');
 is(decision((spawn(type => 'devteam:fullstack-engineer', extra => { isolation => 'worktree' }))[1]), 'deny', 'worktree needs the task_branches grant');
 is(decision((spawn(type => 'devteam:architect', agent => 1))[1]), 'deny', 'agents cannot spawn agents');
-spawn(type => 'devteam:qa-engineer') for 1 .. 5;
+spawn(type => 'devteam:qa-engineer') for 1 .. 8;
 spawn(type => 'devteam:reviewer');
-is(state()->{spawns}, 7, 'seven spawns counted');
-like(reason((spawn(type => 'devteam:reviewer'))[1]), qr/spawn cap reached \(7\/7/, 'the eighth is refused at the cap');
+is(state()->{spawns}, 10, 'ten spawns counted');
+like(reason((spawn(type => 'devteam:reviewer'))[1]), qr/spawn cap reached \(10\/10/, 'the eleventh is refused at the cap');
 
 # --- another session is ignored for main-thread events ---
 ($rc, $out) = hook('guard', { session_id => 'OTHER', tool_name => 'Agent', tool_input => { subagent_type => 'general-purpose' } });
@@ -126,6 +126,11 @@ dt('goal', 'confirm', '--lane', 'standard', '--lifecycle', 'agile-kanban');
 sh(q{perl -MJSON::PP -e 'open F,"<.devteam/config.json";local $/;$c=decode_json(<F>);$c->{gates}{test_affected}="echo BOOM; exit 3";open O,">.devteam/config.json";print O encode_json($c)'});
 dt('resync');
 sub stop { hook('finish-gate', agent_in(hook_event_name => 'SubagentStop', @_)) }
+# found live: QA's acceptance tests are red by design, so gating QA blocked every goal at its first step
+($rc, $out) = stop(id => 'q1', role => 'devteam:qa-engineer');
+is_deeply([$rc, $out], [0, ''], 'QA is not gated: its acceptance tests are red by design');
+ok(!exists state()->{retries}{q1}, 'and no retry is counted against it');
+is(state()->{status}, 'ACTIVE', 'so the goal keeps going');
 for my $n (1 .. 3) {
     ($rc, $out) = stop(id => 'e1');
     is($rc, 2, "failing gate blocks the agent from finishing (retry $n)");

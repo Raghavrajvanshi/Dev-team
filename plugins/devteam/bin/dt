@@ -254,8 +254,18 @@ sub trace_report {
     $src{ $_->{input}{source} // '?' }++ for @comp;
     $add->(%src ? ($src{compact} ? 'confirmed' : 'info') : 'unseen', 'session-start-sources', %src ? 'sources seen: ' . join(', ', sort keys %src) : 'no SessionStart was observed');
 
-    my @dec = grep { ref $_->{decision} eq 'HASH' && ($_->{decision}{exit} // 0) == 2 } @$recs;
-    $add->(@dec ? 'info' : 'unseen', 'finish-gate-blocked', @dec ? scalar(@dec) . ' finish-gate block(s) issued (check the next SubagentStop for the same agent to see it was honoured)' : 'the finish gate never blocked');
+    # A block is honoured when the same agent stops again afterwards (it carried on instead of finishing).
+    my (%stops, %blocks, $cur);
+    for my $r (@$recs) {
+        if (($r->{handler} // '') eq 'finish-gate' && ($r->{event} // '') eq 'SubagentStop') { $cur = $r->{input}{agent_id} // '?'; $stops{$cur}++ }
+        elsif (ref $r->{decision} eq 'HASH' && ($r->{decision}{exit} // 0) == 2 && defined $cur) { $blocks{$cur}++ }
+    }
+    my $nblock = 0;
+    $nblock += $_ for values %blocks;
+    my @honoured = grep { $stops{$_} > $blocks{$_} } keys %blocks;
+    $add->(!$nblock ? 'unseen' : (@honoured ? 'confirmed' : 'info'), 'finish-gate-blocked',
+        !$nblock ? 'the finish gate never blocked'
+        : "$nblock finish-gate block(s) issued" . (@honoured ? ', and the agent stopped again afterwards, so the block was honoured' : ' (no later stop from the same agent was seen, so it is not known to be honoured)'));
 
     my @pr = grep { ($_->{event} // '') eq 'UserPromptSubmit' } @inp;
     my @odd = grep { ($_->{input}{prompt} // '') =~ /<(?:task-notification|cross-session|system-reminder)/ } @pr;

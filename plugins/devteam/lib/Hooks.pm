@@ -15,6 +15,9 @@ our @EXPORT_OK = qw(dispatch);
 my $J = JSON::PP->new->canonical;
 my %WRITER = map { ("devteam:$_" => 1) } qw(fullstack-engineer backend-engineer frontend-engineer
   mobile-engineer devops-engineer qa-engineer tech-writer);
+# QA reports on the suite instead of making it pass: its acceptance tests are red by design, and in verify mode it
+# must not fix code. A gate at its stop would loop it three times and block every goal; dt verify and dt close decide.
+my %UNGATED = ('devteam:qa-engineer' => 1);
 
 # Trace: with DT_TRACE=1 or `dt trace on`, every hook records what it was given and what it decided,
 # so assumptions about Claude Code can be settled from a real run (see `dt trace report`).
@@ -195,7 +198,7 @@ sub route {
 
 sub finish_gate {
     my ($in, $st, $agent) = @_;
-    return unless $agent && $WRITER{ $in->{agent_type} // '' } && $st->{status} eq 'ACTIVE';
+    return unless $agent && $WRITER{ $in->{agent_type} // '' } && !$UNGATED{ $in->{agent_type} } && $st->{status} eq 'ACTIVE';
     my ($ok, $msg) = run_gates($in->{cwd} // root(), 0);
     return if $ok;
     my $cap = config_read()->{fix_rounds} // 3;

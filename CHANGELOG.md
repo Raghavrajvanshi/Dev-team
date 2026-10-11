@@ -2,6 +2,25 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.9] - 2026-10-12
+Second live pass (gap G1): the self-test and a whole goal ran headlessly against the current plugin. Four defects found and fixed.
+### Fixed
+- **The finish gate blocked the QA Engineer.** Acceptance tests are red by design, and in verify mode QA must not fix code, so with a test gate configured every standard goal stopped at its first step: QA was sent back three times and the goal went BLOCKED. QA is no longer gated; `dt verify` and `dt close` decide.
+- **A normal risky goal overran the standard spawn cap.** With the design and diff security passes it needs nine spawns, and the PM skipped QA's verify pass to fit under seven. The standard cap is now 10, and QA verification is added to the steps that are never skipped to stay under a cap.
+- **`dt risk` missed the first real login function** (`def login`, `hashlib.scrypt`, `hmac.compare_digest`): new `auth-code` and `crypto-api` line triggers. Seen live: the tiny lane now reports both and offers the standard lane before closing.
+- **The agent tool returns at once by default** in current Claude Code ("Async agent launched"). `orchestrate` and `/devteam:selftest` now spawn with `run_in_background: false`.
+- **Self-test verdicts.** An agent declining a probe was recorded as `refuted`; it is now `unseen` with the reason (a refusal by the agent is not the hook's decision). The commit probes say they are sanctioned tests. `dt-on-path` now checks that the `dt` found is this plugin's own: a stale 0.2.3 earlier on PATH was "confirmed" in a contaminated first attempt.
+- `dt trace report` decides `finish-gate-blocked` from evidence: confirmed when the same agent stopped again after a block.
+### Confirmed live (Claude Code 2.1.296, headless, `--plugin-dir`, scratch repositories)
+- The self-test: 13 checks confirmed, none refuted. The reviewer's commit was refused by the hook ("role 'devteam:reviewer' may not write to git"); `agent_type` `devteam:security-engineer` reaches the hooks; its tool list has no write tool.
+- The finish gate blocks a `SubagentStop` and the agent carries on: three blocks, a new stop after each, then BLOCKED.
+- A second session's hook events reach the team and its writes are attributed to it; `SessionStart` sources `startup`, `resume` and `compact`.
+- PM mode through setup, onboarding, intake, orchestration and close. A standard goal closed `verified` (5 of 5 criteria, 7 agents, about $1.50 at list prices) with a Security Engineer design pass (6 requirements, and it flagged an out-of-scope overwrite in `create_user`) and diff pass (CLEAR, with its coverage stated).
+### Notes
+- Not yet seen live: the interactive prompts (headless has no `AskUserQuestion`), the user-facing quality loop, several engineers and worktrees, and a Security Engineer diff with real findings.
+- Agents commit with a `Co-Authored-By` trailer because Claude Code's own attribution setting asks for one; the plugin neither adds nor removes it.
+- 9 new tests (622 in all).
+
 ## [0.2.8] - 2026-10-12
 Security Engineer (gap G9, first role): risky changes get a read-only security review, decided by a script.
 ### Added

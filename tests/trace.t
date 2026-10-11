@@ -77,9 +77,21 @@ like($out, qr/^confirmed\s+agent-id-on-subagent-calls/m, 'agent_id confirmed fro
 like($out, qr/^confirmed\s+agent-type-values\s+values seen: devteam:fullstack-engineer/m, 'agent_type values confirmed with the prefix');
 like($out, qr/^info\s+model-effort-passed\s+.*devteam:architect model=haiku effort=low/m, 'model and effort passed are listed');
 like($out, qr/^confirmed\s+session-start-sources\s+sources seen: compact/m, 'compact SessionStart seen');
-like($out, qr/^info\s+finish-gate-blocked\s+1 finish-gate block/m, 'finish gate blocks are counted');
+like($out, qr/^info\s+finish-gate-blocked\s+1 finish-gate block.*not known to be honoured/m, 'a block with no later stop is counted but not claimed as honoured');
 like($out, qr/^confirmed\s+dt-on-path/m, 'a manual note becomes a verdict');
 like($out, qr/^unseen\s+skills-preload/m, 'a manual check without a note stays unseen');
+
+# a block followed by another stop from the same agent is proof the gate was honoured (seen live on 12 October 2026)
+open $f, '>', "$REPO/.devteam/trace.jsonl" or die;
+print $f encode_json($_), "\n" for (
+    { handler => 'finish-gate', event => 'SubagentStop', agent => 1, owned => 1, input => { agent_id => 'a1', agent_type => 'devteam:fullstack-engineer' } },
+    { handler => 'finish-gate', decision => { exit => 2, retry => 1 } },
+    { handler => 'finish-gate', event => 'SubagentStop', agent => 1, owned => 1, input => { agent_id => 'a1', agent_type => 'devteam:fullstack-engineer' } },
+    { handler => 'finish-gate', decision => 'none' },
+);
+close $f;
+($rc, $out) = dt('trace', 'report');
+like($out, qr/^confirmed\s+finish-gate-blocked\s+1 finish-gate block\(s\) issued, and the agent stopped again/m, 'a block followed by another stop is confirmed as honoured');
 
 # --- verdicts that matter when things are wrong ---
 open $f, '>', "$REPO/.devteam/trace.jsonl" or die;

@@ -15,3 +15,5 @@ deserialize	line	\bpickle\.loads?\b|\byaml\.load\s*\(|\bunserialize\s*\(|\bObjec
 dom-injection	line	\binnerHTML\b|\bouterHTML\b|dangerouslySetInnerHTML|document\.write\s*\(|\bv-html\b
 sql-concat	line	\b(?:select|insert|update|delete)\b.*\b(?:from|into|set|where)\b.*(?:\$\{|\+\s*\w|["']\s*\+|%s|\.format\s*\(|\bf["'])
 tls-off	line	verify\s*=\s*False|rejectUnauthorized\s*:\s*false|InsecureSkipVerify\s*:\s*true|CURLOPT_SSL_VERIFYPEER\W+(?:false|0)|NODE_TLS_REJECT_UNAUTHORIZED|--insecure\b
+auth-code	line	\b(?:(?:def|function|func|fn|sub)\s+|(?:const|let|var)\s+)(?:log_?in|log_?out|sign_?in|sign_?out|sign_?up|authenticate|authorize|verify_?password|check_?password|set_?password|reset_?password|create_?session|issue_?token)\b
+crypto-api	line	\b(?:hashlib\.(?:scrypt|pbkdf2_hmac|md5|sha1)|bcrypt|argon2|pbkdf2|hmac\.(?:new|digest|compare_digest)|compare_digest|create(?:Hash|Hmac|Cipher|Cipheriv|Decipheriv)|jsonwebtoken|jwt\.(?:sign|encode|verify|decode)|secrets\.token_\w+)\b
