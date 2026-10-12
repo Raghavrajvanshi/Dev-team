@@ -23,7 +23,7 @@ Nothing is built until the user confirms a goal here. Intake runs in the main th
 - If a check needs tests that do not exist yet (standard/large), QA writes them first and they get hash-locked; the check command is the one that will run them.
 - **Structural criteria are necessary, not sufficient.** Pages loading, links resolving and no console errors do not make something good. For anything user-facing, always add a **quality criterion** as `--type judgement`: *WHEN screenshots of <pages> at 390, 768 and 1280 are reviewed against the design-quality rubric THEN every line scores 4 of 5 or higher* (hierarchy, typography, spacing, colour, imagery, depth, motion, responsiveness, content depth, fidelity to the reference). Keep the manual sign-off too, and say that the user will be shown the screenshots.
 
-**5. Suggest the lifecycle.** Infer the signals and run `dt lifecycle suggest --requirements stable|evolving|unclear --risk regulated|high|normal --delivery project|product|maintenance --ops yes|no --size <lane>`. If the user already named a lifecycle, use it and skip the question.
+**5. Suggest the lifecycle.** Infer the signals and run `dt lifecycle suggest --requirements stable|evolving|unclear --risk regulated|high|normal --delivery project|product|maintenance --ops yes|no --size <lane>`. If the user already named a lifecycle, use it and skip the question. Run `dt lifecycle checks <name>` for the recommendation: its extra done-checks become criteria L1, L2, ... at confirm, so name them in the lifecycle option.
 
 **6. One combined confirmation.** One AskUserQuestion call with up to 4 questions:
 1. *Contract*: show objective, scope and non-goals, and the criteria list. Options: Confirm / Change something.

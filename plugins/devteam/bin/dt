@@ -65,6 +65,55 @@ sub lifecycle_names {
     return sort keys %n;
 }
 
+# The extra done-checks a lifecycle adds to every goal run under it: lines "- cmd: TEXT :: COMMAND",
+# "- judgement: TEXT" and "- manual: TEXT" under "## Extra done-checks" in its profile ({dt} and {goaldir} are
+# filled in). The tiny lane runs no agents, so there a judgement check becomes manual: the user judges it.
+sub lifecycle_checks {
+    my ($name, $lane) = @_;
+    my ($file) = grep { -f } map { "$_/$name.md" } lifecycle_dirs();
+    return unless $file;
+    my ($sec) = (slurp($file) // '') =~ /^## Extra done-checks[^\n]*\n(.*?)(?=^## |\z)/ms;
+    return unless defined $sec;
+    (my $gd = goal_dir() // '') =~ s{^\Q@{[ root() ]}\E/}{};
+    my @out;
+    for my $l (split /\n/, $sec) {
+        my ($type, $rest) = $l =~ /^\s*-\s*(cmd|judgement|manual):\s*(\S.*?)\s*$/ or next;
+        my ($text, $cmd) = $type eq 'cmd' ? split(/\s+::\s+/, $rest, 2) : ($rest, '');
+        next unless length($text // '') && ($type ne 'cmd' || length($cmd // ''));
+        $type = 'manual' if $type eq 'judgement' && ($lane // '') eq 'tiny';
+        if ($type eq 'cmd') { $cmd =~ s/\{dt\}/'$FindBin::Bin\/dt'/g; $cmd =~ s/\{goaldir\}/$gd/g }
+        push @out, { type => $type, text => $text, check => $cmd // '' };
+    }
+    return @out;
+}
+
+# Bring the goal's criteria in line with a lifecycle: open checks of another lifecycle go, this one's are added
+# (ids L1, L2, ...). Checks that already pass are kept. Returns the added and removed criteria ids.
+sub sync_lifecycle_checks {
+    my ($name, $lane) = @_;
+    my $f = goal_file('criteria.json');
+    my $c = jread($f) or return ([], []);
+    my (@added, @removed);
+    my %mine = map { $_->{text} => 1 } grep { ($_->{lifecycle} // '') eq $name } @{ $c->{criteria} };
+    @{ $c->{criteria} } = grep {
+        my $drop = $_->{lifecycle} && $_->{lifecycle} ne $name && !$_->{passes};
+        push @removed, $_->{id} if $drop;
+        !$drop;
+    } @{ $c->{criteria} };
+    my %used = map { $_->{id} => 1 } @{ $c->{criteria} };
+    my $n = 0;
+    for my $w (lifecycle_checks($name, $lane)) {
+        next if $mine{ $w->{text} };
+        $n++ while $used{ 'L' . ($n + 1) };
+        my $id = 'L' . ++$n;
+        $used{$id} = 1;
+        push @{ $c->{criteria} }, { id => $id, %$w, passes => false, evidence => undef, lifecycle => $name };
+        push @added, $id;
+    }
+    if (@added || @removed) { jwrite($f, $c); seal() }
+    return (\@added, \@removed);
+}
+
 # The people behind the role ids. Titles are fixed (team.tsv). Names are drawn at random from names.txt
 # when the team is first needed, kept in .devteam/team.json until the team is stood down, and never
 # repeat within a team. Role ids stay the technical key for hooks, config and spawning.
@@ -487,6 +536,7 @@ sub c_goal {
         my $lc = $o->{lifecycle} // die "dt goal confirm: --lifecycle required\n";
         die "dt: unknown lane '$lane'\n" unless $cfg->{lanes}{$lane};
         die "dt: unknown lifecycle '$lc' (have: " . join(', ', lifecycle_names()) . ")\n" unless grep { $_ eq $lc } lifecycle_names();
+        my ($added) = sync_lifecycle_checks($lc, $lane);
         $s->{lane} = $lane;
         $s->{lifecycle} = $lc;
         $s->{spawn_cap} = $cfg->{lanes}{$lane}{spawn_cap};
@@ -495,7 +545,9 @@ sub c_goal {
         $s->{status} = 'ACTIVE';
         state_write($s);
         ledger_add({ event => 'goal_confirm', goal => $s->{goal}, lane => $lane, lifecycle => $lc, grants => [ sort keys %{ $s->{git_grants} } ] });
-        return print "$s->{goal} confirmed: lane=$lane lifecycle=$lc grants=" . join(',', sort keys %{ $s->{git_grants} }) . "\n";
+        print "$s->{goal} confirmed: lane=$lane lifecycle=$lc grants=" . join(',', sort keys %{ $s->{git_grants} }) . "\n";
+        return print "the $lc lifecycle added done-checks: " . join(', ', @$added) . " (dt criteria show)\n" if @$added;
+        return;
     }
     if (($sub // '') eq 'lane') {
         my $lane = $a[0] // '';
@@ -623,26 +675,39 @@ sub c_gate {
         config_write($cfg);
         return print "gates updated\n";
     }
-    die "dt gate run [--full] [--cwd DIR] | dt gate set KEY=VALUE...\n" unless ($sub // '') eq 'run';
+    die "dt gate run [--full] [--require] [--cwd DIR] | dt gate set KEY=VALUE...\n" unless ($sub // '') eq 'run';
     my ($o) = opts(@a);
     my ($ok, $msg) = run_gates($o->{cwd} // root(), $o->{full});
+    if ($ok && $o->{require} && $msg eq 'gates not configured') {
+        print "no gate is configured, so there is nothing to pass (dt gate set test=COMMAND)\n";
+        $EXIT = 1;
+        return;
+    }
     print "$msg\n";
     $EXIT = 1 unless $ok;
     return;
 }
 
+# Who confirmed a manual or judgement criterion, and what they said, so the closure report keeps the owner's own words.
+sub confirmed_by {
+    my ($cr) = @_;
+    my $e = $cr->{evidence};
+    return '' unless $cr->{passes} && ref $e eq 'HASH' && length($e->{by} // '');
+    return " (confirmed by $e->{by}" . (length($e->{note} // '') ? ": $e->{note}" : ', no note') . ')';
+}
+
 # Record how a goal ended: the closure report, the ledger entry and the outcome record kept in state.
 # result is verified | partial | failed | blocked; the caller stores the returned record in state.
 sub end_goal {
-    my ($s, $result, $because, $gates) = @_;
+    my ($s, $result, $because, $gates, $security) = @_;
     my @all = @{ (jread(goal_file('criteria.json')) // {})->{criteria} // [] };
     my @open = map { $_->{id} } grep { !$_->{passes} } @all;
     my $pass = @all - @open;
     spit(goal_file('closure.md'),
         "# $s->{goal} closed " . ts() . "\noutcome: " . uc($result) . " ($pass of " . scalar(@all) . " criteria pass)\n"
       . "lane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\n"
-      . (defined $gates ? "gates: $gates\n" : '') . "why: $because\n\n"
-      . join('', map { "- $_->{id} " . ($_->{passes} ? 'PASS' : 'OPEN') . ": $_->{text}\n" } @all));
+      . (defined $gates ? "gates: $gates\n" : '') . (length($security // '') ? "security: $security\n" : '') . "why: $because\n\n"
+      . join('', map { "- $_->{id} " . ($_->{passes} ? 'PASS' : 'OPEN') . ": $_->{text}" . confirmed_by($_) . "\n" } @all));
     ledger_add({ event => 'goal_closed', goal => $s->{goal}, outcome => $result, spawns => $s->{spawns}, open => \@open });
     return { result => $result, why => $because, pass => $pass, total => scalar @all, open => \@open, ts => ts() };
 }
@@ -689,8 +754,27 @@ sub c_close {
             return;
         }
     }
+    # A change that trips security triggers (risk.tsv) and that no Security Engineer reviewed is the user's decision:
+    # move up and have it reviewed, or accept it by name. A script decides, so the PM cannot skip the question.
+    my $security = '';
+    unless (security_ran($s->{goal})) {
+        my ($hits) = risk_scan($s->{original_sha} || 'HEAD');
+        if (@$hits) {
+            my @top = @$hits[ 0 .. ($#$hits > 9 ? 9 : $#$hits) ];
+            if ($o->{'accept-risk'} && ($o->{by} // '') eq 'user') {
+                $security = 'no Security Engineer reviewed this goal and the user accepted its triggers: ' . join('; ', @top);
+            } else {
+                print "CLOSE NEEDS THE USER'S DECISION (nothing recorded). The change trips security triggers and no Security Engineer has reviewed it:\n"
+                  . join('', map { "  $_\n" } @top)
+                  . "Show the user this list. Either have it reviewed: dt state transition ACTIVE, dt goal lane standard (the tiny lane runs no agents),\n"
+                  . "then the security pass; or, only if they accept the risk, run:\n  dt close --accept-risk --by user\n";
+                $EXIT = 1;
+                return;
+            }
+        }
+    }
     my $rec = end_goal($s, $partial ? 'partial' : 'verified',
-        $partial ? "accepted as partial by the user: $o->{reason}" : 'every criterion passes and the gates are green', $gates);
+        $partial ? "accepted as partial by the user: $o->{reason}" : 'every criterion passes and the gates are green', $gates, $security);
     update_state(sub { $_[0]{status} = 'ACHIEVED' }) unless $partial;
     update_state(sub { @{ $_[0] }{qw(status outcome)} = ('IDLE', $rec) });
     print +($partial ? "$s->{goal} closed as PARTIAL (open: @{ $v->{open} }) -> IDLE" : "$s->{goal} ACHIEVED -> IDLE")
@@ -707,7 +791,20 @@ sub c_lifecycle {
         my $s = state_read();
         $s->{lifecycle} = $a[0];
         state_write($s);
-        return print "lifecycle = $a[0]\n";
+        print "lifecycle = $a[0]\n";
+        if (length($s->{goal} // '') && $s->{status} =~ /^(?:INTAKE|ACTIVE|PAUSED|BLOCKED)$/) {
+            my ($added, $removed) = locked(sub { sync_lifecycle_checks($a[0], $s->{lane}) });
+            print "done-checks added: " . join(', ', @$added) . "\n" if @$added;
+            print "done-checks removed (they were open and belonged to the previous lifecycle): " . join(', ', @$removed) . "\n" if @$removed;
+        }
+        return;
+    }
+    if ($sub eq 'checks') {
+        my @c = lifecycle_checks($a[0] // '', 'standard');
+        return print "none\n" unless @c;
+        my $i = 0;
+        print 'L' . ++$i . " $_->{type}: $_->{text}" . ($_->{check} ? " :: $_->{check}" : '') . "\n" for @c;
+        return;
     }
     if ($sub eq 'suggest') {
         my ($o) = opts(@a);
@@ -722,7 +819,8 @@ sub c_lifecycle {
             my ($id, @f) = split /\t/, $line;
             my $why = pop @f;
             my $m = 1;
-            for my $i (0 .. $#col) { $m &&= ($f[$i] eq '*' || $sig{ $col[$i] } eq '*' || grep { $_ eq $sig{ $col[$i] } } split /\|/, $f[$i]) }
+            # a signal that was not given satisfies only a "*" cell: a row that asks for ops=yes is not met by silence
+            for my $i (0 .. $#col) { $m &&= ($f[$i] eq '*' || ($sig{ $col[$i] } ne '*' && grep { $_ eq $sig{ $col[$i] } } split /\|/, $f[$i])) }
             push @fit, [ $id, $why ] if $m && !grep { $_->[0] eq $id } @fit;
         }
         close $h;
@@ -734,7 +832,7 @@ sub c_lifecycle {
         print "all: " . join(', ', lifecycle_names()) . "\n";
         return;
     }
-    die "dt lifecycle: list|set NAME|suggest --requirements stable|evolving|unclear --risk regulated|high|normal --delivery project|product|maintenance --ops yes|no --size tiny|standard|large\n";
+    die "dt lifecycle: list|set NAME|checks NAME|suggest --requirements stable|evolving|unclear --risk regulated|high|normal --delivery project|product|maintenance --ops yes|no --size tiny|standard|large\n";
 }
 
 sub c_models {
@@ -951,6 +1049,28 @@ sub c_risk {
     my ($o, $p) = opts(@a);
     $sub //= 'diff';
     die "dt risk [diff [--base REF]] | planned <path>...\n" unless $sub =~ /^(?:diff|planned)$/;
+    my ($hit, $count, $what);
+    if ($sub eq 'planned') {
+        die "dt risk planned <path>...\n" unless @$p;
+        ($hit, $count) = risk_scan(undef, @$p);
+        $what = 'planned';
+    } else {
+        my $base = $o->{base} // (state_read()->{original_sha} || 'HEAD');
+        die "dt risk: '$base' is not a commit in this repository\n" unless git_out(root(), 'rev-parse', '--verify', '--quiet', "$base^{commit}");
+        ($hit, $count) = risk_scan($base);
+        $what = 'changed';
+    }
+    my @hit = @$hit;
+    return print "risk: no triggers in $count $what file(s)\n" unless @hit;
+    print 'risk: ' . scalar(@hit) . " trigger(s) in $count $what file(s); a security review is warranted\n";
+    print map { "  $_\n" } @hit[ 0 .. ($#hit > 19 ? 19 : $#hit) ];
+    print '  ... and ' . (@hit - 20) . " more\n" if @hit > 20;
+}
+
+# The triggers (risk.tsv) in a change since $base (paths, and the lines the change adds), or, with $base undef,
+# in the given planned paths (names only). Returns (\@hits, file count).
+sub risk_scan {
+    my ($base, @planned) = @_;
     my @rules;
     for (split /\n/, slurp("$PLUGIN/risk.tsv") // '') {
         next if /^#/ || !/\S/;
@@ -968,15 +1088,12 @@ sub c_risk {
         return if length $text > 2000;
         $text =~ $_->[2] && $add->($_->[0], $f, $n) for grep { $_->[1] eq 'line' } @rules;
     };
-    my ($count, $what);
-    if ($sub eq 'planned') {
-        die "dt risk planned <path>...\n" unless @$p;
-        $by_path->($_) for @$p;
-        ($count, $what) = (scalar @$p, 'planned');
+    my $count;
+    if (!defined $base) {
+        $by_path->($_) for @planned;
+        $count = scalar @planned;
     } else {
         my $root = root();
-        my $base = $o->{base} // (state_read()->{original_sha} || 'HEAD');
-        die "dt risk: '$base' is not a commit in this repository\n" unless git_out($root, 'rev-parse', '--verify', '--quiet', "$base^{commit}");
         my $changed = DT::Scope::changed($base);
         $by_path->($_) for sort keys %$changed;
         my ($file, $n, $hdr);    # lines the diff adds to tracked files
@@ -993,12 +1110,22 @@ sub c_risk {
             while (my $l = <$h>) { chomp $l; $by_line->($f, $., $l) }
             close $h;
         }
-        ($count, $what) = (scalar keys %$changed, 'changed');
+        $count = scalar keys %$changed;
     }
-    return print "risk: no triggers in $count $what file(s)\n" unless @hit;
-    print 'risk: ' . scalar(@hit) . " trigger(s) in $count $what file(s); a security review is warranted\n";
-    print map { "  $_\n" } @hit[ 0 .. ($#hit > 19 ? 19 : $#hit) ];
-    print '  ... and ' . (@hit - 20) . " more\n" if @hit > 20;
+    return (\@hit, $count);
+}
+
+# Did a Security Engineer finish a review while this goal was running? (The ledger is in order.)
+sub security_ran {
+    my ($goal) = @_;
+    open my $h, '<', ddir() . '/log.jsonl' or return 0;
+    my ($on, $ran) = (0, 0);
+    while (my $l = <$h>) {
+        my $r = eval { decode_json($l) } or next;
+        if (($r->{event} // '') eq 'goal_confirm') { $on = ($r->{goal} // '') eq $goal ? 1 : 0 }
+        $ran = 1 if $on && ($r->{event} // '') eq 'subagent_stop' && ($r->{agent_type} // '') eq 'devteam:security-engineer';
+    }
+    return $ran;
 }
 
 sub c_queue {

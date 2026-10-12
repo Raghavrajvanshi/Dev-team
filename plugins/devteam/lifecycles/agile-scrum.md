@@ -12,6 +12,6 @@ cadence: iteration = a batch of 2-4 tasks ending in an integrated, verified incr
 ## Roles early
 QA writes the acceptance tests for the iteration before the build.
 ## Extra done-checks
-Every iteration ends with a passing full gate run on the merged tree.
+- cmd: WHEN the iteration ends THEN the full gates pass on the merged tree :: {dt} gate run --full
 ## Ceremonies (PM bookkeeping only, never a multi-agent meeting)
 planning, review and retro are short entries in board.md.

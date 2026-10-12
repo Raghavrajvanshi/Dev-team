@@ -126,10 +126,13 @@ like(suggest(qw(--size tiny)), qr/recommended: direct/, 'tiny -> direct');
 like(suggest(qw(--size standard --delivery maintenance)), qr/recommended: agile-kanban/, 'maintenance -> kanban');
 like(suggest(qw(--size large --requirements evolving --delivery product)), qr/recommended: agile-scrum/, 'large evolving product -> scrum');
 like(suggest(qw(--size standard --requirements stable --risk normal --delivery project --ops no)), qr/recommended: waterfall/, 'fixed spec -> waterfall');
-my $o = suggest(qw(--size standard --risk regulated));
-like($o, qr/note: v-model fits best but is not installed/, 'notes an uninstalled best fit');
-like($o, qr/recommended: (?:waterfall|agile-kanban)/, 'falls back to an installed profile');
-like(suggest(qw(--size standard)), qr/runner-up:/, 'offers a runner-up');
+like(suggest(qw(--size standard --risk regulated)), qr/recommended: v-model/, 'regulated -> v-model');
+like(suggest(qw(--size standard --ops yes)), qr/recommended: devops/, 'infra or pipeline central -> devops');
+like(suggest(qw(--size standard --requirements unclear --risk high)), qr/recommended: spiral/, 'unclear and risky -> spiral');
+like(suggest(qw(--size standard --requirements unclear --risk normal --delivery product)), qr/recommended: prototype/, 'unclear UX, normal risk -> prototype');
+unlike(suggest(qw(--size standard --risk regulated)), qr/not installed/, 'nothing is recommended that is missing');
+like(suggest(qw(--size standard --requirements unclear --risk normal --delivery product --ops no)), qr/recommended: prototype.*runner-up: agile-kanban/s, 'offers a runner-up');
+like(suggest(qw(--size standard)), qr/recommended: agile-kanban/, 'with signals missing only the rows that need none can match');
 
 # --- models ---
 ($rc, $out) = dt('models', 'set', 'fullstack-engineer,qa-engineer', '--model', 'opus', '--effort', 'high');

@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (691) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (797) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -161,7 +161,7 @@ Passing checks is not the same as good work, so the process is built around qual
 ### Lanes and lifecycles
 
 - **Lane** is how big the work is: *tiny* (one file or a small fix, **zero agents**), *standard* (a feature in existing code), *large* (several modules). Each lane caps how many agents may start.
-- **Lifecycle** is the process shape, chosen by you from the PM's suggestion: `direct`, `agile-kanban`, `agile-scrum`, `waterfall` today. Each is a short file in [`plugins/devteam/lifecycles/`](plugins/devteam/lifecycles); add your own in `.devteam/lifecycles/<name>.md`, starting from `_template.md`.
+- **Lifecycle** is the process shape, chosen by you from the PM's suggestion: `direct`, `agile-kanban`, `agile-scrum`, `waterfall`, `devops`, `v-model`, `spiral` and `prototype`. Each is a short file in [`plugins/devteam/lifecycles/`](plugins/devteam/lifecycles); add your own in `.devteam/lifecycles/<name>.md`, starting from `_template.md`. A profile can carry **done-checks** (a command, a judgement the verifier makes, or something you confirm): they are listed when you pick the lifecycle, become criteria `L1`, `L2`, ... when you confirm the goal, and the closure report prints who confirmed each one and what they said. They never add a stop or change a cap; in the tiny lane, which runs no agents, a judgement check becomes yours.
 
 ### What it creates in your project
 
@@ -220,16 +220,18 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in a fourth live pass** (12 October 2026, same method, 0.2.9 and 0.2.10 snapshots): a login and search goal closed `verified` (3 of 3 criteria, 5 agents, about $0.53). The Security Engineer's diff pass returned `CLEAR` with three NOTEs that were real: the existing `get_user` SQL injection (outside the diff), a plaintext password returned by `SELECT *`, and a NULL password raising instead of returning `None`. `dt engage` refused to start when another session's transcript was in the same directory, as designed. One suspect, seen in one run only: for a `get_user` change the PM chose the tiny lane, `dt risk` listed `sql-concat`, and the close-out did not offer the standard lane the skill says to offer.
 
+**Confirmed in a fifth live pass** (12 October 2026, same method): a goal under each new lifecycle ran through the PM and closed `verified`: `devops` (done-checks L1 to L3, 8 agents), `v-model` (QA wrote the test plan before the Architect, 9 agents), `spiral` (a risk register with each loop's risks, mitigation and outcome, 7 agents) and `prototype` (2 agents, the file marked disposable). It found three defects, fixed in 0.2.12: the selector treated a signal that was not given as matching any row (it hid behind the missing profiles), the closure report dropped the owner's words on manual checks, and a blanket "yes to everything" was accepted for a check that asks for a decision.
+
 **Found and fixed by the first self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
 
-**Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has a blocking finding (every pass so far came back CLEAR; the latest reported real issues only as NOTEs), and whether the PM offers the standard lane when `dt risk` fires in the tiny lane.
+**Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has a blocking finding (every pass so far came back CLEAR; the latest reported real issues only as NOTEs), and the new security close gate on a goal where the user moves up to the standard lane rather than accepting the risk.
 
-**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has run live several times (see above), but never on a diff with a blocking finding. macOS and Linux only.
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/Writer roles are planned. The Security Engineer has run live several times (see above), but never on a diff with a blocking finding. `dt close` itself now stops a change that trips a security trigger and was not reviewed, until you accept it. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 691 tests
+prove tests/                                        # 797 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

@@ -2,6 +2,24 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.12] - 2026-10-12
+All eight lifecycles (gap G17): DevOps, V-model, Spiral and Prototype, with done-checks that are really enforced.
+### Added
+- `lifecycles/devops.md`, `v-model.md`, `spiral.md`, `prototype.md` (17 to 18 lines each). `dt lifecycle suggest` never recommends a missing profile now, and a test checks every selector row has a file.
+- Done-checks as criteria. Lines `- cmd: TEXT :: COMMAND`, `- judgement: TEXT` and `- manual: TEXT` under `## Extra done-checks` become criteria `L1`, `L2`, ... when a goal is confirmed. Before this, a profile's extra done-checks were prose no code read. `{dt}` and `{goaldir}` are filled in; the tiny lane, which runs no agents, turns a judgement check into a manual one. Prose lines are ignored, so existing and custom profiles keep working; `agile-scrum` now enforces its full-gate check.
+- `dt lifecycle checks NAME`, and `dt lifecycle set` swaps the open done-checks of the old profile for the new one's (checks that passed stay).
+- `dt gate run --full --require`: fails when no gate is configured, so a "green pipeline" check cannot pass by default.
+- The closure report prints who confirmed each manual or judgement criterion and what they said.
+- **A security close gate.** `dt close` now refuses, and tells the PM to ask you, when `dt risk` lists triggers in the change and no Security Engineer reviewed the goal (the tiny lane cannot spawn one). You either have it reviewed (`dt state transition ACTIVE`, `dt goal lane standard`, then the security pass) or accept it with `dt close --accept-risk --by user`; the acceptance is written into the closure report. Settled a suspect another session recorded for 0.2.11: the step lived in skill text and was skipped in one run, and in a repeat run the PM never ran `dt risk` at all.
+- 106 new tests (797 in all): every profile's shape and length, 54 signal combinations never recommending a missing profile, confirm, swap, tiny lane, custom profile, verify, closure, and the security close gate.
+### Fixed
+- **The selector matched a signal that was not given to any row.** A call without `--ops` was met by the `devops` row. The missing profiles had hidden it by falling back; it surfaced as soon as `devops` existed.
+- **A blanket "yes to everything" was accepted for a check that asks for a decision** (the prototype's keep, rebuild or discard). The close-out now records the owner's words as the note and asks once more when they have not said which.
+### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
+- A goal under each new lifecycle closed `verified`: `devops` (8 of 10 agents, three done-checks, the pipeline gate check passing only with a gate configured), `v-model` (QA wrote the test plan before the Architect, the verifier judged coverage, 9 agents), `spiral` (a register of risks, mitigations and outcomes per loop, 7 agents), `prototype` (2 agents, the file opening with `PROTOTYPE: disposable`). About $1.70 each at list prices, $0.70 for the prototype.
+### Notes
+- Not yet seen: a lifecycle changed mid-goal through `/devteam:lifecycle`, and the interactive question showing the done-checks before the user picks.
+
 ## [0.2.11] - 2026-10-12
 Fourth live pass (gap G1): documentation of what ran and what is still owed. No code change.
 ### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
