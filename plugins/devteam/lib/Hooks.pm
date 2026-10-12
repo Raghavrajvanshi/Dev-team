@@ -171,10 +171,51 @@ sub dt_authority {
     return;
 }
 
+# Commands that change something outside the working tree: a cluster, a cloud account, a registry, a deploy
+# platform. A subagent never runs them; the user does, with the exact command shown (the rule for a git push).
+# Best effort, like the git classifier: a script that wraps them (make deploy) is not seen.
+my %INFRA_ANY = map { $_ => 1 } qw(aws gcloud gsutil az doctl heroku vercel netlify flyctl fly wrangler firebase);
+my @TF = qw(apply destroy import taint untaint force-unlock);
+my %INFRA_SUB = (
+    terraform => \@TF, tofu => \@TF, pulumi => [qw(up destroy refresh import cancel)],
+    kubectl => [qw(apply create delete patch replace scale rollout drain cordon uncordon taint label annotate edit set expose run exec cp)],
+    helm => [qw(install upgrade uninstall rollback)], docker => [qw(push login)], podman => [qw(push login)],
+    npm => ['publish'], yarn => ['publish'], pnpm => ['publish'], cargo => [qw(publish yank)], twine => ['upload'],
+    gem => ['push'], mvn => ['deploy'], serverless => [qw(deploy remove)], sls => [qw(deploy remove)],
+    cdk => [qw(deploy destroy bootstrap)], sam => ['deploy'],
+);
+sub infra_remote {
+    my ($cmd, $depth) = @_;
+    $depth //= 0;
+    return if $depth > 2;
+    for my $seg (segments($cmd)) {
+        my @w = eval { shellwords($seg) } or next;
+        shift @w while @w && ($w[0] =~ /^[A-Za-z_]\w*=/ || $w[0] =~ m{^(?:sudo|command|env|nice|time|exec)$});
+        next unless @w;
+        (my $bin = $w[0]) =~ s{.*/}{};
+        if ($bin =~ /^(?:ba|z|da)?sh$/) {    # sh -c '...': look inside
+            my ($i) = grep { $w[$_] =~ /^-\w*c$/ } 1 .. $#w;
+            my $r = defined $i && defined $w[ $i + 1 ] ? infra_remote($w[ $i + 1 ], $depth + 1) : undef;
+            return $r if $r;
+            next;
+        }
+        return "'$bin'" if $INFRA_ANY{$bin};
+        my $subs = $INFRA_SUB{$bin} or next;
+        next if $bin =~ /^(?:kubectl|helm)$/ && grep { /^--dry-run(?:=client)?$/ } @w;    # client side only
+        my %bad = map { $_ => 1 } @$subs;
+        my ($sub) = grep { $bad{$_} } grep { !/^-/ } @w[ 1 .. $#w ];
+        return "'$bin $sub'" if defined $sub;
+    }
+    return;
+}
+
 sub git_guard {
     my ($in, $st, $agent) = @_;
     return unless $agent && ($in->{tool_name} // '') eq 'Bash';
     if (my $why = dt_authority($in->{tool_input}{command} // '')) { deny($why) }
+    if (my $what = infra_remote($in->{tool_input}{command} // '')) {
+        deny("$what changes something outside the working tree (a cluster, a cloud account, a registry or a deploy platform); the user runs it with the exact command shown, so reply NEEDS_CONTEXT and put it under DEPLOY FACTS");
+    }
     my $c = classify($in->{tool_input}{command} // '');
     my $tier = $c->{tier};
     return if $tier eq 'none' || $tier eq 'read';

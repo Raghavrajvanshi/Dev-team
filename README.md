@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (622) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (691) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -139,11 +139,12 @@ Every role is a person with a title. **Names are drawn at random when the team i
 | QA Engineer | `qa-engineer` | agent |
 | Staff Engineer (code review) | `reviewer` | agent |
 | Security Engineer | `security-engineer` | agent, read-only; started when `dt risk` finds a trigger |
+| DevOps Engineer | `devops-engineer` | agent; started for pipeline, container and infrastructure tasks; never deploys |
 | Acceptance Verifier | `goal-verifier` | agent |
 | Research Analyst | `researcher` | agent |
 | UX Designer | `ux-designer` | agent |
 
-Planned: Backend, Frontend, Mobile, DevOps and Technical Writer roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
+Planned: Backend, Frontend, Mobile and Technical Writer roles. Names come from `plugins/devteam/names.txt`; they are generated, not assigned, and any resemblance to real people is coincidental.
 
 ### How the team thinks
 
@@ -155,7 +156,7 @@ Passing checks is not the same as good work, so the process is built around qual
 4. **Polish until it passes.** Anything under 4 of 5 goes back to an engineer with concrete fixes, for up to two rounds; if it still fails you see the scores and screenshots.
 5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
-7. **Risky changes get a security look.** `dt risk` (a script, no model call) checks the planned files and the finished diff against the triggers in [`plugins/devteam/risk.tsv`](plugins/devteam/risk.tsv): authentication, payments, secrets, uploads and webhooks, pipelines, dependency manifests and migrations by path, and by added line `eval` and shell calls, unsafe deserialization, string-built SQL, `innerHTML` and disabled TLS checks. When one fires, or the goal's risk is high or regulated, the read-only Security Engineer reviews the design for threats (STRIDE) before code and the diff for exploitable flaws (OWASP Top 10) after it, and reports only what an attacker can reach. A match is a reason to look, not a finding; edit `risk.tsv` to tune it. This complements, and does not replace, Claude Code's own `security-guidance` plugin and `/security-review`, and the scanners in your CI.
+7. **Risky changes get a security look.** `dt risk` (a script, no model call) checks the planned files and the finished diff against the triggers in [`plugins/devteam/risk.tsv`](plugins/devteam/risk.tsv): authentication, payments, secrets, uploads and webhooks, pipelines, dependency manifests and migrations by path, and by added line `eval` and shell calls, unsafe deserialization, string-built SQL, `innerHTML` and disabled TLS checks. When one fires, or the goal's risk is high or regulated, the read-only Security Engineer reviews the design for threats (STRIDE) before code and the diff for exploitable flaws (OWASP Top 10) after it, and reports only what an attacker can reach. A match is a reason to look, not a finding; edit `risk.tsv` to tune it. Pipeline files also route the task to the DevOps Engineer, who writes them as code and checks them locally. This complements, and does not replace, Claude Code's own `security-guidance` plugin and `/security-review`, and the scanners in your CI.
 
 ### Lanes and lifecycles
 
@@ -215,16 +216,18 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in a second live pass** (12 October 2026, headless, Claude Code 2.1.296, the current plugin loaded with `--plugin-dir`, scratch repositories): the self-test (13 checks confirmed, none refuted); the finish gate blocks a `SubagentStop` and the agent carries on; a second session's events reach the hooks and its writes are attributed to it; `SessionStart` reports `startup`, `resume` and `compact`; PM mode (`claude --agent devteam:project-manager`) runs setup, onboarding, intake, orchestration and close; and a standard goal with a Security Engineer design pass and diff pass closed `verified` (5 of 5 criteria, 7 agents, about $1.50 at list prices). It also found four defects, fixed in 0.2.9: the finish gate blocked the QA Engineer's red-by-design acceptance tests, a risky goal overran the standard spawn cap, `dt risk` missed a login function, and a stale `dt` could pass the self-test.
 
+**Confirmed in a third live pass** (12 October 2026, same method): the DevOps Engineer was routed to a CI-workflow goal by `dt risk planned`, wrote SHA-pinned, least-privilege YAML, reported what it could not run (`actionlint` and a YAML parser were not installed, and it did not install them) and its rollback, and the goal closed `verified` in two separate runs (7 and 8 of 10 agents); the deploy guard refused `terraform apply` from a probe. It found one process hole, fixed in 0.2.10: a Security FIX had been dismissed on the reviewer's word and the goal closed before the user was asked.
+
 **Found and fixed by the first self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
 
 **Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has real findings (both its passes came back CLEAR).
 
-**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/DevOps/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has run live twice (see above), but only on a clean diff. macOS and Linux only.
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/Writer roles and the DevOps, V-model, Spiral and Prototype lifecycles are planned. The Security Engineer has run live twice (see above), but only on a clean diff. macOS and Linux only.
 
 ## Develop
 
 ```bash
-prove tests/                                        # 622 tests
+prove tests/                                        # 691 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

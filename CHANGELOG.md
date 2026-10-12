@@ -2,6 +2,24 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.10] - 2026-10-12
+DevOps Engineer (gap G9, second role) and a guard that keeps deploys with the user.
+### Added
+- `devops-engineer` agent (`devteam:devops-engineer`): writes pipeline, container and infrastructure files as code inside a task's allowed files; verifies with the project's own static checks and tests, never installs a tool and says which check could not run; never deploys. Its reply carries CHECKS and DEPLOY FACTS (what a deploy would run, where, which secrets by name, the rollback).
+- `orchestrate` routes a task whose planned files list a `pipeline:` entry in `dt risk planned` to this role instead of `fullstack-engineer`, and shows any DEPLOY FACTS in the close-out question; the deploy is the user's to run.
+- `git-guard` refuses, for every subagent, commands that change something outside the working tree: `terraform`/`tofu` apply and destroy, `kubectl` and `helm` mutations (a client-side dry run is allowed), `docker` push and login, `npm`/`yarn`/`pnpm`/`cargo`/`twine`/`gem`/`mvn` publish and deploy, `serverless`/`cdk`/`sam` deploys, `pulumi up`, and any `aws`, `gcloud`, `az`, `vercel`, `netlify`, `fly` call; also inside `sh -c`, after `sudo`/`env`, and in `&&` chains. A wrapper script (`make deploy`) is not seen.
+- Self-test: Probe A also tries `terraform apply`, recorded as `deploy-guard-live`.
+- 69 new tests (691 in all): the agent contract, the routing text, 22 refused and 20 allowed commands, and a mutation check showing the guard tests fail when the guard is off.
+### Fixed
+- **A Security FIX could be dismissed.** In a live run the PM sided with the reviewer against the Security Engineer and closed the goal, then told the user. A security FIX is now fixed or put to the user before `dt close`, and a security requirement that contradicts `design.md` is an exception stop.
+### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
+- Self-test: 14 confirmed, none refuted; the engineer probe's `terraform apply` was refused ("changes something outside the working tree").
+- A CI-workflow goal ran twice through research, design, a Security Engineer design pass, the DevOps Engineer, QA verify, a Security diff pass, review and the verifier, and closed `verified` both times (7 and 8 of 10 agents, about $1.10 each at list prices). The DevOps Engineer reported `actionlint` and a YAML parser as not run rather than installing them, and its rollback.
+- The pinned `actions/checkout` and `actions/setup-python` SHAs the agents wrote match the upstream tags (checked against the GitHub tags API).
+### Notes
+- The two runs differed: SHA pins in one, floating `@v7` tags in the other. Both disclosed what was unverified; the Security Engineer accepted both. Consistency is a G3 (evals) question.
+- Not yet seen live: the DevOps Engineer on a real deploy script or infrastructure-as-code repository, and a DEPLOY FACTS block with something in it.
+
 ## [0.2.9] - 2026-10-12
 Second live pass (gap G1): the self-test and a whole goal ran headlessly against the current plugin. Four defects found and fixed.
 ### Fixed

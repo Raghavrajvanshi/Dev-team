@@ -27,7 +27,7 @@ my @EFFORTS = qw(low medium high xhigh max);
 my @MANUAL = (['skills-preload', 'plugin skills preloaded into an agent by bare name'], ['model-override', 'the model passed on spawn is the model the agent runs as'],
     ['state-protect-live', 'a subagent write to protected state is denied'], ['git-guard-live', 'a subagent push is denied'],
     ['dt-on-path', 'dt resolves from the plugin bin/ directory'], ['dt-authority-live', 'a subagent running dt close is denied'],
-    ['sessions-registry', "Claude Code's session registry lists the running session"], ['security-engineer-live', 'the Security Engineer has no write tools and cannot commit'], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
+    ['sessions-registry', "Claude Code's session registry lists the running session"], ['security-engineer-live', 'the Security Engineer has no write tools and cannot commit'], ['deploy-guard-live', 'a subagent running terraform apply is denied'], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
 my %CMD = (
     init => \&c_init, gitignore => \&c_gitignore, preflight => \&c_preflight, state => \&c_state,
     engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
