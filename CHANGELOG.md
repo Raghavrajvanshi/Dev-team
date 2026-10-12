@@ -2,6 +2,15 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.11] - 2026-10-12
+Fourth live pass (gap G1): documentation of what ran and what is still owed. No code change.
+### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
+- A login and search goal closed `verified` (3 of 3 criteria, 5 agents, about $0.53). The Security Engineer's diff pass returned `CLEAR` with three real NOTEs: the existing `get_user` SQL injection outside the diff, a plaintext password returned by `SELECT *`, and a NULL password raising instead of returning `None`.
+- `dt engage` refused to engage when another session's transcript was in the working directory (`ENGAGE NEEDS A CHOICE (nothing changed)`).
+### Open
+- **Tiny lane did not offer the standard lane (suspect, one run).** For a `get_user` change the PM chose the tiny lane and edited `app.py` itself; `dt risk` listed `sql-concat`, but the close-out did not offer `dt goal lane standard`, which the `orchestrate` skill says to offer so a Security Engineer can review. Needs a repeat before it is called a defect.
+- Still not seen live: a Security `FIX` on a diff and the fix loop that follows; the interactive question prompts; the quality loop (researcher, designer, screenshots); several engineers and worktrees.
+
 ## [0.2.10] - 2026-10-12
 DevOps Engineer (gap G9, second role) and a guard that keeps deploys with the user.
 ### Added
