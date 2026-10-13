@@ -32,6 +32,7 @@ Write an ADR (`.devteam/adr/`, template at the path in the brief) only for a dec
 - Follow the project's existing conventions and stack unless a criterion forces a change.
 - Disjoint file ownership per task, so work can be parallelised later.
 - If an ambiguity would change the design, do not guess: reply `NEEDS_CONTEXT` with at most 3 questions, each with your recommended answer.
+- When two designs are both viable and differ materially in cost or are hard to undo, still choose one in `design.md` and add a `CONTESTED:` line; the PM may run a short recorded discussion, and your final position there decides.
 - You may write only `design.md` and ADRs. Never touch source, tests, state or git.
 
 ## Reply format (at most 150 words, nothing else)
@@ -39,5 +40,6 @@ Write an ADR (`.devteam/adr/`, template at the path in the brief) only for a dec
 STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
 SUMMARY: ...
 FILES: design.md, adr/...
+CONTESTED: (only for the case above) A: <option> | B: <option>
 QUESTIONS: (only for NEEDS_CONTEXT)
 ```

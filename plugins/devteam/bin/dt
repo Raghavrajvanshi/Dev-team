@@ -28,6 +28,12 @@ my @MANUAL = (['skills-preload', 'plugin skills preloaded into an agent by bare 
     ['state-protect-live', 'a subagent write to protected state is denied'], ['git-guard-live', 'a subagent push is denied'],
     ['dt-on-path', 'dt resolves from the plugin bin/ directory'], ['dt-authority-live', 'a subagent running dt close is denied'],
     ['sessions-registry', "Claude Code's session registry lists the running session"], ['security-engineer-live', 'the Security Engineer has no write tools and cannot commit'], ['deploy-guard-live', 'a subagent running terraform apply is denied'], ['guard-live', 'the spawn guard refuses an untyped agent and a worktree spawn without a grant'], ['pm-mode', 'claude --agent devteam:project-manager works as the PM']);
+# A bounded discussion (gap G18): who may be started for a statement, who may only speak through a reply that is
+# already on hand (engineers are writers: the finish gate would hold a consult), and the two caps.
+my @SPEAKS = qw(architect reviewer security-engineer researcher ux-designer);
+my %SPEAKS = map { $_ => 1 } @SPEAKS;
+my @REPLY_ONLY = qw(fullstack-engineer backend-engineer frontend-engineer mobile-engineer devops-engineer qa-engineer);
+my ($DISCUSS_WORDS, $DISCUSS_ROUNDS) = (150, 2);
 my %CMD = (
     init => \&c_init, gitignore => \&c_gitignore, preflight => \&c_preflight, state => \&c_state,
     engage => \&c_engage, disengage => \&c_disengage, goal => \&c_goal, criteria => \&c_criteria,
@@ -35,13 +41,13 @@ my %CMD = (
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
     team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge, trace => \&c_trace,
-    sessions => \&c_sessions, scope => \&c_scope, risk => \&c_risk,
+    sessions => \&c_sessions, scope => \&c_scope, risk => \&c_risk, discuss => \&c_discuss,
 );
 
 my $cmd = shift @ARGV // '';
 if (!$CMD{$cmd}) { print STDERR "usage: dt <" . join('|', sort keys %CMD) . "> ...\n"; exit 2 }
 our $EXIT = 0;
-my %LOCKED = map { $_ => 1 } qw(state engage disengage goal grant branch resync criteria models queue);
+my %LOCKED = map { $_ => 1 } qw(state engage disengage goal grant branch resync criteria models queue discuss);
 eval { $LOCKED{$cmd} ? locked(sub { $CMD{$cmd}->(@ARGV) }) : $CMD{$cmd}->(@ARGV); 1 } or do { print STDERR $@; exit 1 };
 exit $EXIT;
 
@@ -704,11 +710,12 @@ sub end_goal {
     my @open = map { $_->{id} } grep { !$_->{passes} } @all;
     my $pass = @all - @open;
     my $review = review_summary($s->{goal});
+    my $talks = discussion_summary($s->{goal});
     spit(goal_file('closure.md'),
         "# $s->{goal} closed " . ts() . "\noutcome: " . uc($result) . " ($pass of " . scalar(@all) . " criteria pass)\n"
       . "lane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\n"
       . (defined $gates ? "gates: $gates\n" : '') . (length($security // '') ? "security: $security\n" : '')
-      . (length($review) ? "review: $review\n" : '') . "why: $because\n\n"
+      . (length($review) ? "review: $review\n" : '') . $talks . "why: $because\n\n"
       . join('', map { "- $_->{id} " . ($_->{passes} ? 'PASS' : 'OPEN') . ": $_->{text}" . confirmed_by($_) . "\n" } @all));
     ledger_add({ event => 'goal_closed', goal => $s->{goal}, outcome => $result, spawns => $s->{spawns}, open => \@open });
     return { result => $result, why => $because, pass => $pass, total => scalar @all, open => \@open, ts => ts() };
@@ -722,6 +729,12 @@ sub c_close {
     my $s = state_read();
     die "dt: close needs status VERIFYING (is $s->{status}); finish the work first\n" unless $s->{status} eq 'VERIFYING';
     my $partial = $o->{'accept-partial'} ? 1 : 0;
+    my @talking = grep { $_->{goal} eq $s->{goal} && $_->{status} eq 'open' } values %{ discuss_all() };
+    if (@talking) {
+        print "CLOSE REFUSED:\n" . join('', map { "- discussion $_->{id} is still open: dt discuss decide $_->{id}, or dt discuss cancel $_->{id} --reason \"...\"\n" } @talking);
+        $EXIT = 1;
+        return;
+    }
     my $tamper = check_seal();    # first: verify_all re-seals, so a second attempt must not see a clean seal
     if (@$tamper) { print "CLOSE REFUSED:\n- protected files changed outside dt: @$tamper (review, then 'dt resync')\n"; $EXIT = 1; return }
     my $v = verify_all(1);
@@ -943,6 +956,10 @@ sub c_status {
         printf "criteria: %d/%d pass\n", scalar(grep { $_->{passes} } @{ $c->{criteria} }), scalar @{ $c->{criteria} };
         my $oc = $s->{outcome} // {};
         print "outcome: " . uc($oc->{result}) . " ($oc->{pass}/$oc->{total} pass" . (@{ $oc->{open} } ? "; open: @{ $oc->{open} }" : '') . "): $oc->{why}\n" if $oc->{result};
+        for my $d (grep { $_->{goal} eq $s->{goal} && $_->{status} eq 'open' } values %{ discuss_all() }) {
+            my $st = discuss_state($d);
+            print "discussion: $d->{id} open, round " . ($st->{cur} > $DISCUSS_ROUNDS ? $DISCUSS_ROUNDS : $st->{cur}) . " of $DISCUSS_ROUNDS (dt discuss status $d->{id})\n";
+        }
     }
     if ($s->{engaged}) {
         my @live = live_others($s->{owner_session} // '');
@@ -1162,6 +1179,308 @@ sub security_ran {
         $ran = 1 if $on && ($r->{event} // '') eq 'subagent_stop' && ($r->{agent_type} // '') eq 'devteam:security-engineer';
     }
     return $ran;
+}
+
+# --- dt discuss: one contested decision, 2 or 3 participants, at most two rounds of at most 150 words, mediated by the
+# PM (agents never message each other). The Architect's final position decides, dissent is logged and the outcome is
+# written as an ADR. The caps live here, so a prompt cannot talk past them. State is .devteam/discussions.json (not
+# writable by agents); .devteam/discussions/<id>.md is the readable record the participants are told to read.
+sub discuss_all { jread(ddir() . '/discussions.json') // {} }
+sub nwords { scalar(() = ($_[0] // '') =~ /\S+/g) }
+sub flag { my ($o, $k) = @_; my $v = $o->{$k}; defined $v && $v ne '1' ? $v : '' }
+
+# Who must speak for round $r to be complete: everyone in round 1; later only those who can be started
+# (a reply already on hand stands in for an engineer's side, so it cannot be asked again).
+sub discuss_need { my ($d, $r) = @_; return grep { $r == 1 || $SPEAKS{$_} } @{ $d->{participants} } }
+
+sub discuss_state {
+    my ($d) = @_;
+    my (%by, %last);
+    for my $x (@{ $d->{statements} }) { $by{ $x->{round} }{ $x->{role} } = $x; $last{ $x->{role} } = $x }
+    my $done = 0;
+    for my $r (1 .. $DISCUSS_ROUNDS) {
+        my @need = discuss_need($d, $r);
+        last unless @need && !grep { !$by{$r}{$_} } @need;
+        $done = $r;
+    }
+    my %pos = map { $_->{position} => 1 } values %last;
+    my $every = $done && !grep { !$last{$_} } @{ $d->{participants} };
+    return { by => \%by, last => \%last, done => $done, cur => $done + 1,
+        consensus => $every && keys(%pos) == 1 ? 1 : 0, agreed => keys(%pos) == 1 ? (keys %pos)[0] : '' };
+}
+
+# What the PM does next, in one or two lines.
+sub discuss_next {
+    my ($d, $st) = @_;
+    my $id = $d->{id};
+    return "next: dt discuss decide $id (all agree on $st->{agreed}; no second round is needed)\n" if $st->{consensus};
+    if ($st->{done} && $st->{done} >= $DISCUSS_ROUNDS) { return "next: dt discuss decide $id (the $DISCUSS_ROUNDS rounds are used)\n" }
+    my $r = $st->{cur};
+    my @wait = grep { !$st->{by}{$r}{$_} } discuss_need($d, $r);
+    my $begun = %{ $st->{by}{$r} // {} } ? 1 : 0;
+    return "next: round 1 still needs: @wait (a reply already on hand: dt discuss say $id <role> --source reply ...; the rest: dt discuss brief $id <role>)\n"
+        if @wait && !$st->{done};
+    return "next: round $r still needs: @wait (dt discuss brief $id <role>)\n" if @wait && $begun;
+    my %who;
+    push @{ $who{ $st->{last}{$_}{position} } }, $_ for sort keys %{ $st->{last} };
+    my $split = join('; ', map { "$_: " . join(', ', @{ $who{$_} }) } sort keys %who);
+    return "split ($split). next: dt discuss decide $id (the Architect's position stands) or, when the others can say something new, round 2: "
+        . join(', ', discuss_need($d, 2)) . " each with dt discuss brief $id <role>\n";
+}
+
+sub discuss_render {
+    my ($d) = @_;
+    my @l = ("# $d->{id}: $d->{question}", '',
+        "trigger: $d->{trigger}. Why it is contested: $d->{evidence}",
+        ($d->{context} ? "Look at: $d->{context}" : ()),
+        "Limits: $DISCUSS_ROUNDS rounds, $DISCUSS_WORDS words a statement. The Architect's final position decides; dissent is kept.", '',
+        '## Options', (map { "- $_->{id}: $_->{text}" } @{ $d->{options} }), '- NEW: none of these (say what, in the argument)', '',
+        'Participants: ' . join(', ', @{ $d->{participants} }));
+    for my $r (1 .. $DISCUSS_ROUNDS) {
+        my @x = grep { $_->{round} == $r } @{ $d->{statements} } or next;
+        push @l, '', "## Round $r";
+        push @l, '', "### $_->{role}: $_->{position} ($_->{source})", $_->{text} for @x;
+    }
+    if (my $x = $d->{decision}) {
+        push @l, '', '## Decision', "$x->{chosen} (decided by the Architect after $x->{rounds} round(s); ADR $x->{adr})";
+        push @l, ($x->{dissent} && @{ $x->{dissent} }) ? ('Dissent:', map { "- $_->{role}" . (length $_->{position} ? " ($_->{position})" : '') . ": $_->{text}" } @{ $x->{dissent} }) : 'Dissent: none';
+    }
+    push @l, '', "## Cancelled: $d->{cancelled}" if $d->{status} eq 'cancelled';
+    return join("\n", @l) . "\n";
+}
+
+sub discuss_adr {
+    my ($d, $num, $x) = @_;
+    return join("\n", "# ADR-$num: $d->{question}", 'Status: accepted',
+        "Context: contested ($d->{trigger}): $d->{evidence}",
+        'Options:', (map { "- $_->{id}: $_->{text}" } @{ $d->{options} }),
+        "Decision: $x->{chosen}", "Reasons (the Architect): $x->{reasons}",
+        (@{ $x->{dissent} } ? ('Dissent:', map { "- $_->{role}" . (length $_->{position} ? " wanted $_->{position}" : '') . ": $_->{text}" } @{ $x->{dissent} }) : 'Dissent: none'),
+        "Rounds: $x->{rounds} of $DISCUSS_ROUNDS. Record: discussions/$d->{id}.md") . "\n";
+}
+
+# Spawns and tokens between a discussion's open and close in the ledger: only its participants run in that window.
+sub discussion_costs {
+    open my $h, '<', ddir() . '/log.jsonl' or return {};
+    my (%c, $cur);
+    while (my $l = <$h>) {
+        my $r = eval { jdecode($l) } or next;
+        my $e = $r->{event} // '';
+        if ($e eq 'discussion_open') { $cur = $r->{id}; $c{$cur} = { spawns => 0 } }
+        elsif ($e eq 'discussion_close') { $cur = undef }
+        elsif ($e eq 'subagent_stop' && defined $cur) {
+            $c{$cur}{spawns}++;
+            for my $m (values %{ $r->{tokens} // {} }) { $c{$cur}{$_} += $m->{$_} // 0 for qw(input output cache_read cache_write) }
+        }
+    }
+    return \%c;
+}
+
+# The closure report's lines about this goal's discussions.
+sub discussion_summary {
+    my ($goal) = @_;
+    my @d = sort { $a->{created} cmp $b->{created} } grep { $_->{goal} eq $goal } values %{ discuss_all() };
+    return '' unless @d;
+    my $cost = discussion_costs();
+    my $out = '';
+    for my $d (@d) {
+        my $c = $cost->{ $d->{id} } // {};
+        my $what = $d->{status};
+        if (my $x = $d->{decision}) {
+            my $dis = @{ $x->{dissent} } ? 'dissent: ' . join(', ', map { $_->{role} } @{ $x->{dissent} }) : 'no dissent';
+            $what = "decided $x->{option} in $x->{rounds} round(s), $dis";
+        }
+        $out .= "discussion: $d->{id} ($d->{trigger}) $what; " . ($c->{spawns} // 0) . ' spawn(s) ('
+            . join(' ', map { "$_->[0]=" . ($c->{ $_->[1] } // 0) } ['in', 'input'], ['out', 'output'], ['cache_read', 'cache_read'], ['cache_write', 'cache_write']) . ")\n";
+    }
+    return $out;
+}
+
+sub c_discuss {
+    my ($sub, @a) = @_;
+    need_init();
+    $sub //= 'list';
+    my ($o, $p) = opts(@a);
+    my $all = discuss_all();
+    my $save = sub {
+        my ($d) = @_;
+        $all->{ $d->{id} } = $d;
+        jwrite(ddir() . '/discussions.json', $all);
+        make_path(ddir() . '/discussions');
+        spit(ddir() . "/discussions/$d->{id}.md", discuss_render($d));
+    };
+    my $get = sub { my $id = $p->[0] // ''; $all->{$id} // die "dt discuss: no discussion '$id' (dt discuss list)\n" };
+    my $usage = "dt discuss new|say|status|brief|decide|cancel|show|list\n";
+
+    if ($sub eq 'list') {
+        my @d = sort { $a->{created} cmp $b->{created} } values %$all;
+        return print "no discussions\n" unless @d;
+        for my $d (@d) {
+            my $st = discuss_state($d);
+            printf "%s  %s  %s  %s\n", $d->{id}, $d->{status}, $d->{status} eq 'open' ? "round " . ($st->{cur} > $DISCUSS_ROUNDS ? $DISCUSS_ROUNDS : $st->{cur}) . " of $DISCUSS_ROUNDS" : "$d->{trigger}", $d->{question};
+        }
+        return;
+    }
+    if ($sub eq 'new') {
+        my $s = state_read();
+        my $trig = flag($o, 'trigger');
+        die "dt discuss new: --trigger dispute|options|user. A discussion runs only when one of them fired.\n" unless $trig =~ /^(?:dispute|options|user)$/;
+        my $in_goal = $s->{status} eq 'ACTIVE';
+        die "dt discuss: the goal status is $s->{status}; a discussion runs in an ACTIVE goal (a debate the user asked for may also run with dt state set adhoc=true)\n"
+            unless $in_goal || ($s->{adhoc} && $trig eq 'user');
+        die "dt discuss: the tiny lane runs no agents, so it holds no discussion (dt goal lane standard first)\n" if $in_goal && $s->{lane} eq 'tiny';
+        my ($q, $ev, $ctx) = map { flag($o, $_) } qw(question evidence context);
+        die "dt discuss new: --question \"<the decision to take, at most 60 words>\"\n" unless $q =~ /\w/ && nwords($q) <= 60;
+        die "dt discuss new: --evidence \"<why it is contested: the finding and the objection, or the user's words; at most 80 words>\"\n" unless $ev =~ /\w/ && nwords($ev) <= 80;
+        die "dt discuss new: --context is at most 40 words\n" if nwords($ctx) > 40;
+        my (@opt, %oid);
+        for my $x (split /\|/, flag($o, 'options')) {
+            $x =~ /^\s*([A-D])\s*=\s*(\S.*?)\s*$/ or die "dt discuss new: --options \"A=<option>|B=<option>\" (ids A to D, 2 to 4 options)\n";
+            my ($id, $text) = ($1, $2);
+            die "dt discuss new: option $id is at most 40 words\n" if nwords($text) > 40;
+            die "dt discuss new: option $id is listed twice\n" if $oid{$id}++;
+            push @opt, { id => $id, text => $text };
+        }
+        die "dt discuss new: --options \"A=<option>|B=<option>\" (2 to 4 options)\n" unless @opt >= 2;
+        my @who = grep { length } map { s/^\s+|\s+$//gr } split /,/, flag($o, 'participants');
+        die "dt discuss new: --participants \"architect,reviewer\" (2 or 3 roles)\n" unless @who >= 2 && @who <= 3;
+        my %seen;
+        $seen{$_}++ for @who;
+        die "dt discuss new: a participant is listed twice\n" if grep { $seen{$_} > 1 } keys %seen;
+        my %known = map { $_ => 1 } @SPEAKS, @REPLY_ONLY;
+        my @bad = grep { !$known{$_} } @who;
+        die "dt discuss new: unknown role(s): @bad. Use: @SPEAKS; engineer and QA roles may take part only through a reply already on hand.\n" if @bad;
+        die "dt discuss new: the Architect decides, so it takes part\n" unless $seen{architect};
+        my $goal = $s->{goal} || 'adhoc';
+        my @mine = grep { $_->{goal} eq $goal } values %$all;
+        my ($open) = grep { $_->{status} eq 'open' } @mine;
+        die "dt discuss new: $open->{id} is still open; decide it or cancel it first\n" if $open;
+        my $max = (config_read()->{discussions} // {})->{max_per_goal} // 2;
+        my $held = grep { $_->{status} ne 'cancelled' } @mine;
+        die "dt discuss new: $goal has held $max discussions already (the cap per goal); decide this one without a discussion, or the user raises discussions.max_per_goal in config.json\n"
+            if $goal ne 'adhoc' && $held >= $max;
+        die "dt discuss new: no spawns left ($s->{spawns}/$s->{spawn_cap}); the user raises the cap, or the decision is taken without a discussion\n"
+            if $in_goal && $s->{spawn_cap} - $s->{spawns} < 1;
+        my $id = "$goal-D" . (@mine + 1);
+        my $d = { id => $id, goal => $goal, status => 'open', trigger => $trig, question => $q, evidence => $ev, context => $ctx,
+            options => \@opt, participants => \@who, statements => [], created => ts() };
+        $save->($d);
+        ledger_add({ event => 'discussion_open', id => $id, goal => $goal, trigger => $trig, participants => \@who });
+        print "discussion $id opened ($trig): at most $DISCUSS_ROUNDS rounds, $DISCUSS_WORDS words a statement. Record: .devteam/discussions/$id.md\n"
+            . discuss_next($d, discuss_state($d));
+        return;
+    }
+    if ($sub eq 'say') {
+        my $d = $get->();
+        my $role = $p->[1] // '';
+        die "dt discuss: $d->{id} is $d->{status}\n" unless $d->{status} eq 'open';
+        die "dt discuss say: '$role' does not take part in $d->{id} (@{ $d->{participants} })\n" unless grep { $_ eq $role } @{ $d->{participants} };
+        my $st = discuss_state($d);
+        die "dt discuss say: everyone agrees on $st->{agreed}; a second round would be theatre: dt discuss decide $d->{id}\n" if $st->{consensus};
+        die "dt discuss say: the $DISCUSS_ROUNDS rounds are used: dt discuss decide $d->{id}\n" if $st->{cur} > $DISCUSS_ROUNDS;
+        my $pos = uc flag($o, 'position');
+        die "dt discuss say: --position " . join('|', (map { $_->{id} } @{ $d->{options} }), 'NEW') . "\n"
+            unless $pos eq 'NEW' || grep { $_->{id} eq $pos } @{ $d->{options} };
+        my $text = flag($o, 'text');
+        die "dt discuss say: --text \"<the statement>\"\n" unless $text =~ /\w/;
+        my $w = nwords($text);
+        die "dt discuss say: $w words; a statement is at most $DISCUSS_WORDS. Shorten it and keep the reasons.\n" if $w > $DISCUSS_WORDS;
+        my $src = flag($o, 'source') eq 'reply' ? 'reply' : 'spawn';
+        die "dt discuss say: a reply that is already on hand can stand in for round 1 only\n" if $src eq 'reply' && $st->{cur} > 1;
+        die "dt discuss say: $role takes part only through a reply already on hand (--source reply); it is not started for a statement\n" if $src eq 'spawn' && !$SPEAKS{$role};
+        die "dt discuss say: $role has spoken in round $st->{cur} already\n" if $st->{by}{ $st->{cur} }{$role};
+        push @{ $d->{statements} }, { round => $st->{cur}, role => $role, position => $pos, text => $text, source => $src, ts => ts() };
+        $save->($d);
+        ledger_add({ event => 'discussion_say', id => $d->{id}, role => $role, round => $st->{cur}, position => $pos, source => $src, words => $w });
+        print "recorded: $role says $pos (round $st->{cur}, $w word" . ($w == 1 ? '' : 's') . ")\n" . discuss_next($d, discuss_state($d));
+        return;
+    }
+    if ($sub eq 'status') {
+        my $d = $get->();
+        my $st = discuss_state($d);
+        print "$d->{id} ($d->{trigger}): $d->{status}, round " . ($st->{cur} > $DISCUSS_ROUNDS ? $DISCUSS_ROUNDS : $st->{cur}) . " of $DISCUSS_ROUNDS\n";
+        print "  $_->{round} $_->{role}: $_->{position} ($_->{source})\n" for @{ $d->{statements} };
+        print discuss_next($d, $st) if $d->{status} eq 'open';
+        return;
+    }
+    if ($sub eq 'brief') {
+        my $d = $get->();
+        my $role = $p->[1] // '';
+        die "dt discuss brief: '$role' does not take part in $d->{id}\n" unless grep { $_ eq $role } @{ $d->{participants} };
+        my $r = discuss_state($d)->{cur};
+        die "dt discuss brief: the $DISCUSS_ROUNDS rounds are used\n" if $r > $DISCUSS_ROUNDS;
+        my $ids = join(' | ', (map { $_->{id} } @{ $d->{options} }), 'NEW');
+        print "Contested decision $d->{id}, round $r of $DISCUSS_ROUNDS. Speak as the $role, from that role's concern.\n"
+            . "Question: $d->{question}\n"
+            . 'Options: ' . join('; ', map { "$_->{id}: $_->{text}" } @{ $d->{options} }) . "; NEW: none of these (say what in the argument).\n"
+            . "Read first: .devteam/discussions/$d->{id}.md" . ($r > 1 ? ' (the other statements are in it: answer them)' : '')
+            . ($d->{context} ? "; also: $d->{context}" : '') . ".\n"
+            . "Reply with exactly these lines and nothing else:\nSTATUS: DONE | NEEDS_CONTEXT\nPOSITION: $ids\n"
+            . 'ARGUMENT: at most 120 words: the fact, file and line that decides it' . ($r > 1 ? '; say whether you changed your mind and why' : '') . "\n"
+            . "Change no file, state or git, and start no other agent.\n";
+        return;
+    }
+    if ($sub eq 'decide') {
+        my $d = $get->();
+        die "dt discuss: $d->{id} is $d->{status}\n" unless $d->{status} eq 'open';
+        my $st = discuss_state($d);
+        die "dt discuss decide: round 1 is not complete; still needed: "
+            . join(', ', grep { !$st->{by}{1}{$_} } discuss_need($d, 1)) . "\n" unless $st->{done};
+        my @half = $st->{cur} <= $DISCUSS_ROUNDS ? grep { !$st->{by}{ $st->{cur} }{$_} } discuss_need($d, $st->{cur}) : ();
+        die "dt discuss decide: round $st->{cur} is half done; it still needs: @half. Record it (a participant that cannot answer: its earlier position and the reason).\n"
+            if @half && %{ $st->{by}{ $st->{cur} } // {} };
+        my $arch = $st->{last}{architect} or die "dt discuss decide: the Architect has not spoken\n";
+        my $opt = $arch->{position};
+        my %txt = map { $_->{id} => $_->{text} } @{ $d->{options} };
+        my $chosen = $opt eq 'NEW' ? "a new option: $arch->{text}" : "$opt: $txt{$opt}";
+        my @dis = map { +{ role => $_, position => $st->{last}{$_}{position}, text => $st->{last}{$_}{text} } }
+            grep { $_ ne 'architect' && $st->{last}{$_} && $st->{last}{$_}{position} ne $opt } @{ $d->{participants} };
+        # a view that is on record but whose owner never took part (a colleague the user quotes): kept as dissent too
+        if (length(my $x = flag($o, 'dissent'))) {
+            my ($who, $words) = $x =~ /^\s*([^:]{1,60}?)\s*:\s*(\S.*)$/s or die "dt discuss decide: --dissent \"<who>: <their words>\"\n";
+            die "dt discuss decide: a dissent is at most $DISCUSS_WORDS words\n" if nwords($words) > $DISCUSS_WORDS;
+            push @dis, { role => $who, position => '', text => $words };
+        }
+        my $dir = ddir() . '/adr';
+        make_path($dir);
+        my $max = 0;
+        if (opendir my $dh, $dir) { for (readdir $dh) { $max = $1 if /^(?:ADR-?)?(\d+)/i && $1 > $max } closedir $dh }
+        my $num = sprintf '%04d', $max + 1;
+        (my $slug = lc $d->{question}) =~ s/[^a-z0-9]+/-/g;
+        $slug =~ s/^-+|-+$//g;
+        $slug = $1 if length($slug) > 48 && substr($slug, 0, 49) =~ /^(.{1,48})-/;    # end on a whole word
+        $slug = substr($slug, 0, 48);
+        $slug =~ s/^-+|-+$//g;
+        my $adr = "adr/$num-" . ($slug || 'decision') . '.md';
+        my $rounds = $st->{done};
+        my $x = { option => $opt, chosen => $chosen, reasons => $arch->{text}, dissent => \@dis, rounds => $rounds, adr => $adr, ts => ts() };
+        spit(ddir() . "/$adr", discuss_adr($d, $num, $x));
+        $d->{status} = 'decided';
+        $d->{decision} = $x;
+        $save->($d);
+        ledger_add({ event => 'discussion_close', id => $d->{id}, goal => $d->{goal}, outcome => 'decided', option => $opt,
+            rounds => $rounds, dissent => [ map { $_->{role} } @dis ] });
+        print "decided: $chosen\n" . (@dis ? 'dissent: ' . join('; ', map { $_->{role} . (length $_->{position} ? " ($_->{position})" : '') } @dis) : 'no dissent')
+            . ". ADR: .devteam/$adr\nApply it: if it changes the design or a task, say so in the next brief. The user may overrule it at any time.\n";
+        return;
+    }
+    if ($sub eq 'cancel') {
+        my $d = $get->();
+        die "dt discuss: $d->{id} is $d->{status}\n" unless $d->{status} eq 'open';
+        my $why = flag($o, 'reason');
+        die "dt discuss cancel: --reason \"<why no decision was taken>\"\n" unless $why =~ /\w/;
+        @$d{qw(status cancelled)} = ('cancelled', $why);
+        $save->($d);
+        ledger_add({ event => 'discussion_close', id => $d->{id}, goal => $d->{goal}, outcome => 'cancelled', reason => $why });
+        print "$d->{id} cancelled: $why\n";
+        return;
+    }
+    if ($sub eq 'show') {
+        my $d = $get->();
+        print discuss_render($d);
+        return;
+    }
+    die $usage;
 }
 
 sub c_queue {

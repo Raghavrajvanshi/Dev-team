@@ -102,6 +102,7 @@ sub guard {
         my $s = state_read();
         my $stat = $s->{status};
         if ($stat eq 'IDLE') {
+            return if $s->{adhoc} && $type =~ /^devteam:/;    # a one-off consult or debate (/devteam:ask) with no goal
             deny('no goal is active; start one before using devteam agents') if $type =~ /^devteam:/;
             return;
         }

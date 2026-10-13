@@ -2,6 +2,29 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.14] - 2026-10-13
+Bounded discussion (gap G18): a contested decision gets a short, recorded, mediated exchange and an ADR, only when a trigger fired. Two older defects found by the live pass are fixed.
+### Added
+- **`dt discuss`** and the `devteam:discuss` skill. Three triggers start a discussion and `dt discuss new` refuses anything else: `dispute` (an engineer's DONE_WITH_CONCERNS contests a reviewer finding the code does not settle), `options` (the Architect's reply carries a `CONTESTED:` line: two viable designs that differ materially in cost or are hard to undo) and `user` (`/devteam:ask debate <question>`). Two or three roles take part, the Architect always. Round 1 is independent: a statement already on hand (an engineer's objection, the design's own choice) goes in free with `--source reply`, the others are started in one foreground message and speak in parallel. Round 2 happens only when they split and can add something; there is no third. A statement is at most 150 words and a position names an option or `NEW`.
+- The Architect's final position decides. A participant who ends elsewhere is logged as dissent in their own words (`decide --dissent "<who>: <words>"` adds one from a person who never took part), and the outcome is an ADR in `.devteam/adr/` (options, decision, reasons, dissent) beside a readable record in `.devteam/discussions/<id>.md`. Engineers are writers, so they speak only through a reply already on hand.
+- **The caps are in the script, not the prompt**: participant set, trigger, word cap, rounds, two discussions per goal (`discussions.max_per_goal` in `config.json`), the spawn budget, and no discussion in the tiny lane. State is `.devteam/discussions.json`, which agents cannot write. `dt close` refuses while one is open (`decide`, or `cancel --reason`). `dt status` shows an open one.
+- The ledger records open, every statement and close; the closure report prints each discussion's decision, dissent and the spawns and tokens spent between its open and close.
+- `/devteam:ask debate <question>`; the Architect's reply format gains the `CONTESTED:` line; `orchestrate` names the three triggers and what a discussion is never for (a security FIX, a criterion or scope change, the tiny lane).
+- 119 new tests (967 in all): every refusal, the caps, consensus short-circuit, split and round 2, dissent kept in the ADR and the record, ADR numbering, the ledger window, the close guard, agent authority, and the written parts.
+### Fixed
+- **A one-off consult with no goal was refused.** The spawn guard denied every `devteam:*` agent while the status was IDLE before it looked at the `adhoc` flag that `/devteam:ask` sets for exactly this case, so `/devteam:ask <role> <question>` outside a goal never started an agent. Seen live (three refusals, the PM cancelled the discussion and reported it); now an `adhoc` consult starts, and clearing the flag closes it again.
+- **A recorded view from outside the participants was lost.** A debate where the user quoted an engineer's objection produced "Dissent: none", and the PM hand-edited the ADR and the record to put it back. `decide --dissent` keeps it, and the skill says an on-record view is a participant (`fullstack-engineer`, `--source reply`) or a `--dissent`, never a hand edit.
+- ADR file names end on a whole word (at most 48 characters).
+### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
+- A user-requested debate (JSON file or SQLite, Architect and Reviewer): both started in one message, both chose the JSON file, no second round, an ADR with the options and the Architect's reasons; the goal closed `verified` in 8 agents. The discussion cost 2 spawns (out=810, cache_write=14173).
+- The Architect and the Security Engineer on where a service token lives: both chose an environment variable (the config file is one `git add` from a commit, the keychain is macOS only); 2 spawns, 7 agents in the goal.
+- `/devteam:ask debate` with no goal active (after the guard fix): the PM set `adhoc`, the Architect and the Reviewer ran side by side, both chose the file, an ADR was written and `adhoc` was cleared; the whole session cost about $0.19.
+- A debate where the user quoted an engineer's objection (after the skill fix): the PM added `fullstack-engineer` as a participant with `--source reply`, the split was reported by position (A: Architect and Reviewer; B: the engineer), the Architect's position stood without a second round, and the engineer's dissent is in the ADR, the record and the closure line in their own words.
+- Control: a goal with no trigger left no discussion state, no ADR and no closure line. A goal that named a 50-to-500,000 notes uncertainty did not make the Architect flag `CONTESTED:` ("nothing here is seriously contested"), and no discussion ran.
+### Notes
+- Not seen live: the `dispute` trigger from a real DONE_WITH_CONCERNS, an Architect `CONTESTED:` line, and a round 2 (every discussion among spawned roles ended in agreement after round 1; the one split was an engineer's recorded view). What a second round changes is untested. Whether a discussion improves decisions at all is a G3 (evals) question; the closure line is there to price it.
+- Agent teams' direct peer messaging was not used: it is experimental, interactive only and off by default, so it is unavailable headless, and it would bypass the spawn cap and the ledger.
+
 ## [0.2.13] - 2026-10-13
 Review gate (gap G6): the review is as big as the risk, and a script decides which one applies. Two older defects found by the live pass are fixed.
 ### Added

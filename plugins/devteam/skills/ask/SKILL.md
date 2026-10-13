@@ -11,3 +11,5 @@ Roles: architect, reviewer, qa-engineer, fullstack-engineer, goal-verifier. The 
 1. If no goal is ACTIVE, `dt state set adhoc=true` so the spawn guard allows this one-off. In ACTIVE the normal guard applies and the spawn counts toward the cap.
 2. Spawn `devteam:<role>` with a brief: the question, "answer only; change no files, state or git", and the reply limit of 150 words. Use `dt models get <role>` as in `orchestrate`.
 3. `dt state set adhoc=false` afterwards. Relay the answer.
+
+**`/devteam:ask debate <question>`** asks for a recorded discussion instead (trigger `user`): invoke `devteam:discuss` with the user's words as the evidence, the options they named (if none, ask once in one line), and participants `architect,reviewer`. It needs an ACTIVE goal outside the tiny lane, or no goal and `dt state set adhoc=true` for its duration.

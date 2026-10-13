@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (848) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (967) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -124,6 +124,7 @@ When work will not fully verify, the PM shows you the unmet criteria and offers:
 | `/devteam:changemodels` | Pick team members, then set their model and effort |
 | `/devteam:lifecycle [name]` | Show or change the process lifecycle |
 | `/devteam:ask <role> <question>` | One-off consult with a role (read-only) |
+| `/devteam:ask debate <question>` | A short, recorded discussion between the Architect and a second role; the Architect decides and an ADR is written |
 | `/devteam:selftest` | In a scratch repo, check what Claude Code really does with the plugin (see below) |
 
 ### The team
@@ -158,6 +159,7 @@ Passing checks is not the same as good work, so the process is built around qual
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
 7. **Risky changes get a security look.** `dt risk` (a script, no model call) checks the planned files and the finished diff against the triggers in [`plugins/devteam/risk.tsv`](plugins/devteam/risk.tsv): authentication, payments, secrets, uploads and webhooks, pipelines, dependency manifests and migrations by path, and by added line `eval` and shell calls, unsafe deserialization, string-built SQL, `innerHTML` and disabled TLS checks. When one fires, or the goal's risk is high or regulated, the read-only Security Engineer reviews the design for threats (STRIDE) before code and the diff for exploitable flaws (OWASP Top 10) after it, and reports only what an attacker can reach. A match is a reason to look, not a finding; edit `risk.tsv` to tune it. Pipeline files also route the task to the DevOps Engineer, who writes them as code and checks them locally. This complements, and does not replace, Claude Code's own `security-guidance` plugin and `/security-review`, and the scanners in your CI.
 8. **The review is as big as the risk.** The same script decides the shape of the review: `dt risk` ends with `review: gate` or `review: single pass`. With no trigger, one Reviewer reads the diff. With a trigger, a goal stated as high risk or regulated, or a diff of more than 400 added lines, three independent passes run side by side: the Security Engineer (exploitability), a Reviewer with the correctness lens and a Reviewer with the design lens. The PM merges them into one list (a finding two lenses report at the same lines counts once; HIGH before MEDIUM; at most five NITs; what the diff did not introduce is listed apart and never blocks), an engineer fixes the blocking items, and the next round re-checks only the lenses that had blocking findings, against the fix diff. At most three rounds, then you decide; a security finding is fixed or put to you, never dismissed. The closure report prints what the review passes cost.
+9. **A contested decision gets a short, recorded discussion, never an open chat.** Three things start one, and `dt discuss new` refuses anything else: an engineer's objection to a reviewer finding that the code does not settle, a choice the Architect flags as two viable designs that differ materially in cost, or you asking for a debate (`/devteam:ask debate <question>`). Two or three roles take part: round 1 is independent, round 2 (only when they split and have something new) answers the others, each statement is at most 150 words, and the PM carries every statement (agents never message each other). The Architect's final position decides, dissent is kept in the dissenter's words, and the outcome is written as an ADR in `.devteam/adr/`. A discussion counts against the spawn cap, never runs in the tiny lane, is limited to two per goal, and the closure report prints what it cost. A security finding is never settled this way: it is fixed or put to you.
 
 ### Lanes and lifecycles
 
@@ -225,6 +227,8 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in a sixth live pass** (13 October 2026, same method): a normal goal took the single-pass review (one Reviewer, 4 agents), the same goal stated as high risk took the gate (the Security Engineer and the correctness and design Reviewers in parallel, 5 agents), and an uncommitted file with seeded defects went through the gate, a fix and two re-checks (12 agents): every seeded defect was found by at least two lenses and the goal closed `verified`. It found three older defects, fixed in 0.2.13: the ledger undercounted output tokens, non-ASCII text in a criterion was stored twice-encoded so its check could not pass, and the Reviewer could not see uncommitted work.
 
+**Confirmed in a seventh live pass** (13 October 2026, same method): a debate the user asked for (JSON file or SQLite) ran with the Architect and the Reviewer started side by side, both chose the file, and an ADR recorded the options and the reasons; the Architect and the Security Engineer settled where a service token lives (environment variable) the same way; a goal with no trigger left no discussion at all, and the Architect did not flag a design as contested when a goal named an uncertainty. It found two older defects, fixed in 0.2.14: the spawn guard refused every consult outside a goal even with the one-off flag set (so `/devteam:ask <role>` with no goal never ran), and a view that was on record but not a participant was written as "Dissent: none" until the PM edited the ADR by hand. A recorded engineer's objection was kept as dissent in the ADR in their own words after the skill was fixed, and `/devteam:ask debate` with no goal ran after the guard was fixed. Not seen live: the `dispute` trigger from a real objection, an Architect `CONTESTED:` line, and a discussion that needed its second round.
+
 **Found and fixed by the first self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
 
 **Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has a blocking finding (every pass so far came back CLEAR; the latest reported real issues only as NOTEs), and the new security close gate on a goal where the user moves up to the standard lane rather than accepting the risk.
@@ -234,7 +238,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 848 tests
+prove tests/                                        # 967 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict
