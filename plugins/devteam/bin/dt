@@ -6,7 +6,7 @@ use FindBin;
 use lib "$FindBin::Bin/../lib";
 use JSON::PP;
 use File::Path qw(make_path);
-use DT qw(root ddir slurp spit jread jwrite ts true false default_state default_config state_read state_write
+use DT qw(root ddir slurp spit jread jwrite jdecode jencode jpretty ts true false default_state default_config state_read state_write
   config_read config_write goal_dir seal check_seal sha_file git_out tree_key run_cmd ledger_add
   locked update_state run_gates);
 use DT::Sessions qw(live_others holder_status lease_write foreign_writes ack acked probe transcript_file);
@@ -322,7 +322,7 @@ sub trace_report {
 
     my ($tot, $withtok) = (0, 0);
     if (open my $lh, '<', ddir() . '/log.jsonl') {
-        while (my $l = <$lh>) { my $r = eval { decode_json($l) } or next; next unless ($r->{event} // '') eq 'subagent_stop'; $tot++; $withtok++ if $r->{tokens} }
+        while (my $l = <$lh>) { my $r = eval { jdecode($l) } or next; next unless ($r->{event} // '') eq 'subagent_stop'; $tot++; $withtok++ if $r->{tokens} }
     }
     $add->($tot ? ($withtok ? 'confirmed' : 'refuted') : 'unseen', 'subagent-token-usage',
         $tot ? "$withtok of $tot subagent stops had token usage in the ledger" : 'no subagent stop reached the ledger');
@@ -356,11 +356,11 @@ sub c_trace {
         my ($id, $verdict, @t) = @a;
         die "dt trace note ID confirmed|refuted|unseen [evidence...]\n" unless length($id // '') && ($verdict // '') =~ /^(?:confirmed|refuted|unseen)$/;
         open my $h, '>>', $f or die "dt: cannot write the trace: $!\n";
-        print $h JSON::PP->new->canonical->encode({ ts => ts(), kind => 'note', id => $id, verdict => $verdict, text => join(' ', @t) }), "\n";
+        print $h jencode({ ts => ts(), kind => 'note', id => $id, verdict => $verdict, text => join(' ', @t) }), "\n";
         close $h;
         return print "noted $id: $verdict\n";
     }
-    my @recs = map { eval { decode_json($_) } || () } split /\n/, (slurp($f) // '');
+    my @recs = map { eval { jdecode($_) } || () } split /\n/, (slurp($f) // '');
     if ($sub eq 'status') { return printf "trace: %s, %d record(s)\n", (config_read()->{trace} ? 'on' : 'off'), scalar @recs }
     if ($sub eq 'show') {
         my ($o) = opts(@a);
@@ -368,7 +368,7 @@ sub c_trace {
         my @t = @recs > $n ? @recs[-$n .. -1] : @recs;
         for my $r (@t) {
             if (($r->{kind} // '') eq 'note') { print "$r->{ts} note $r->{id}: $r->{verdict} $r->{text}\n" }
-            elsif (exists $r->{decision}) { my $d = ref $r->{decision} ? encode_json($r->{decision}) : $r->{decision}; print "$r->{ts} $r->{handler} -> " . substr($d, 0, 110) . "\n" }
+            elsif (exists $r->{decision}) { my $d = ref $r->{decision} ? jencode($r->{decision}) : $r->{decision}; print "$r->{ts} $r->{handler} -> " . substr($d, 0, 110) . "\n" }
             else { printf "%s %-16s %-17s agent=%d owned=%d keys=%s\n", $r->{ts}, $r->{handler}, $r->{event} // '', $r->{agent} // 0, $r->{owned} // 0, join(',', sort keys %{ $r->{input} // {} }) }
         }
         return;
@@ -423,8 +423,8 @@ sub c_state {
     need_init();
     my $s = state_read();
     $sub //= 'show';
-    if ($sub eq 'show') { print JSON::PP->new->canonical->pretty->encode($s); return }
-    if ($sub eq 'get') { my $v = $s->{ $a[0] // '' }; print ref $v ? encode_json($v) : ($v // ''), "\n"; return }
+    if ($sub eq 'show') { print jpretty($s); return }
+    if ($sub eq 'get') { my $v = $s->{ $a[0] // '' }; print ref $v ? jencode($v) : ($v // ''), "\n"; return }
     if ($sub eq 'set') {
         for my $kv (@a) {
             my ($k, $v) = split /=/, $kv, 2;
@@ -703,10 +703,12 @@ sub end_goal {
     my @all = @{ (jread(goal_file('criteria.json')) // {})->{criteria} // [] };
     my @open = map { $_->{id} } grep { !$_->{passes} } @all;
     my $pass = @all - @open;
+    my $review = review_summary($s->{goal});
     spit(goal_file('closure.md'),
         "# $s->{goal} closed " . ts() . "\noutcome: " . uc($result) . " ($pass of " . scalar(@all) . " criteria pass)\n"
       . "lane: $s->{lane}, lifecycle: $s->{lifecycle}, agents spawned: $s->{spawns}\n"
-      . (defined $gates ? "gates: $gates\n" : '') . (length($security // '') ? "security: $security\n" : '') . "why: $because\n\n"
+      . (defined $gates ? "gates: $gates\n" : '') . (length($security // '') ? "security: $security\n" : '')
+      . (length($review) ? "review: $review\n" : '') . "why: $because\n\n"
       . join('', map { "- $_->{id} " . ($_->{passes} ? 'PASS' : 'OPEN') . ": $_->{text}" . confirmed_by($_) . "\n" } @all));
     ledger_add({ event => 'goal_closed', goal => $s->{goal}, outcome => $result, spawns => $s->{spawns}, open => \@open });
     return { result => $result, why => $because, pass => $pass, total => scalar @all, open => \@open, ts => ts() };
@@ -1046,9 +1048,10 @@ sub c_scope {
 sub c_risk {
     my ($sub, @a) = @_;
     need_init();
+    if (defined $sub && $sub =~ /^--/) { unshift @a, $sub; $sub = 'diff' }    # `dt risk --goal-risk high` is `dt risk diff ...`
     my ($o, $p) = opts(@a);
     $sub //= 'diff';
-    die "dt risk [diff [--base REF]] | planned <path>...\n" unless $sub =~ /^(?:diff|planned)$/;
+    die "dt risk [diff [--base REF] [--goal-risk high|regulated|normal]] | planned <path>...\n" unless $sub =~ /^(?:diff|planned)$/;
     my ($hit, $count, $what);
     if ($sub eq 'planned') {
         die "dt risk planned <path>...\n" unless @$p;
@@ -1059,24 +1062,34 @@ sub c_risk {
         die "dt risk: '$base' is not a commit in this repository\n" unless git_out(root(), 'rev-parse', '--verify', '--quiet', "$base^{commit}");
         ($hit, $count) = risk_scan($base);
         $what = 'changed';
+        my $gr = $o->{'goal-risk'} // '';
+        die "dt risk: --goal-risk is high, regulated or normal\n" if length $gr && $gr !~ /^(?:high|regulated|normal)$/;
+        $hit = [ "goal-risk: $gr (stated at intake)", @$hit ] if $gr =~ /^(?:high|regulated)$/;
     }
     my @hit = @$hit;
-    return print "risk: no triggers in $count $what file(s)\n" unless @hit;
+    my $review = $sub eq 'planned' ? '' : @hit ? "review: gate (security, correctness and design lenses in parallel)\n" : "review: single pass (one reviewer)\n";
+    return print "risk: no triggers in $count $what file(s)\n$review" unless @hit;
     print 'risk: ' . scalar(@hit) . " trigger(s) in $count $what file(s); a security review is warranted\n";
     print map { "  $_\n" } @hit[ 0 .. ($#hit > 19 ? 19 : $#hit) ];
     print '  ... and ' . (@hit - 20) . " more\n" if @hit > 20;
+    print $review;
 }
 
 # The triggers (risk.tsv) in a change since $base (paths, and the lines the change adds), or, with $base undef,
 # in the given planned paths (names only). Returns (\@hits, file count).
 sub risk_scan {
     my ($base, @planned) = @_;
-    my @rules;
-    for (split /\n/, slurp("$PLUGIN/risk.tsv") // '') {
-        next if /^#/ || !/\S/;
-        my ($kind, $where, $re) = split /\t/;
-        push @rules, [ $kind, $where, qr/$re/i ];
+    my (@rules, %size);
+    for my $f ("$PLUGIN/risk.tsv", ddir() . '/risk.tsv') {    # the plugin's table, then the project's own
+        for (split /\n/, slurp($f) // '') {
+            next if /^#/ || !/\S/;
+            my ($kind, $where, $re) = split /\t/;
+            next unless defined $re;
+            if ($where eq 'size') { $size{$kind} = $re + 0; next }
+            push @rules, [ $kind, $where, qr/$re/i ];
+        }
     }
+    my $added = 0;
     my (%seen, @hit);
     my $add = sub {
         my ($kind, $path, $n) = @_;
@@ -1101,18 +1114,41 @@ sub risk_scan {
             if (/^diff --git/) { ($hdr, $file) = (1, undef); next }
             if ($hdr && /^\+\+\+ b\/(.*)/) { $file = $1; next }
             if (/^@@ -\S+ \+(\d+)/) { ($hdr, $n) = (0, $1); next }
-            $by_line->($file, $n++, substr($_, 1)) if !$hdr && defined $file && /^\+/;
+            next unless !$hdr && defined $file && /^\+/;
+            $added++;
+            $by_line->($file, $n++, substr($_, 1));
         }
         # a new file is all additions
         for my $f (grep { length } split /\0/, git_out($root, 'ls-files', '-o', '--exclude-standard', '-z', '--', '.', @NOISE)) {
             next unless -f "$root/$f" && -s _ < 524288 && -T _;
             open my $h, '<', "$root/$f" or next;
-            while (my $l = <$h>) { chomp $l; $by_line->($f, $., $l) }
+            while (my $l = <$h>) { chomp $l; $added++; $by_line->($f, $., $l) }
             close $h;
         }
         $count = scalar keys %$changed;
+        for my $k (sort keys %size) { push @hit, "$k: $added lines added (the trigger is above $size{$k})" if $added > $size{$k} }
     }
     return (\@hit, $count);
+}
+
+# What the review passes of this goal cost: how many ran per role and their tokens, from the ledger. The closure
+# report prints it next to the findings, so the gate's price is never a surprise. A fresh agent writes its whole
+# context to the cache once, so cache_write is part of the price and is shown.
+sub review_summary {
+    my ($goal) = @_;
+    open my $h, '<', ddir() . '/log.jsonl' or return '';
+    my ($on, %n, %tok) = (0);
+    while (my $l = <$h>) {
+        my $r = eval { jdecode($l) } or next;
+        if (($r->{event} // '') eq 'goal_confirm') { $on = ($r->{goal} // '') eq $goal ? 1 : 0; (%n, %tok) = () if $on }
+        next unless $on && ($r->{event} // '') eq 'subagent_stop';
+        my $t = ($r->{agent_type} // '') =~ /^devteam:(reviewer|security-engineer)$/ ? $1 : next;
+        $n{$t}++;
+        for my $m (values %{ $r->{tokens} // {} }) { $tok{$_} += $m->{$_} // 0 for qw(input output cache_read cache_write) }
+    }
+    return '' unless %n;
+    return join(', ', map { "$_ x$n{$_}" } sort keys %n)
+        . ' (' . join(' ', map { ($_ eq 'input' ? 'in' : $_ eq 'output' ? 'out' : $_) . '=' . ($tok{$_} // 0) } qw(input output cache_read cache_write)) . ')';
 }
 
 # Did a Security Engineer finish a review while this goal was running? (The ledger is in order.)
@@ -1121,7 +1157,7 @@ sub security_ran {
     open my $h, '<', ddir() . '/log.jsonl' or return 0;
     my ($on, $ran) = (0, 0);
     while (my $l = <$h>) {
-        my $r = eval { decode_json($l) } or next;
+        my $r = eval { jdecode($l) } or next;
         if (($r->{event} // '') eq 'goal_confirm') { $on = ($r->{goal} // '') eq $goal ? 1 : 0 }
         $ran = 1 if $on && ($r->{event} // '') eq 'subagent_stop' && ($r->{agent_type} // '') eq 'devteam:security-engineer';
     }
@@ -1146,7 +1182,7 @@ sub c_ledger {
     open my $h, '<', ddir() . '/log.jsonl' or return print "ledger: empty\n";
     my (%ev, %tok);
     while (<$h>) {
-        my $r = eval { decode_json($_) } or next;
+        my $r = eval { jdecode($_) } or next;
         $ev{ $r->{event} . ($r->{agent_type} ? " $r->{agent_type}" : '') . ($r->{outcome} ? " ($r->{outcome})" : '') }++;
         for my $m (keys %{ $r->{tokens} // {} }) { $tok{$m}{$_} += $r->{tokens}{$m}{$_} for keys %{ $r->{tokens}{$m} } }
     }

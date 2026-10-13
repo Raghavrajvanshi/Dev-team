@@ -11,8 +11,8 @@ sub slurp { open my $h, '<', $_[0] or die "$_[0]: $!"; local $/; <$h> }
 my @rules = grep { !/^#/ && /\S/ } split /\n/, slurp("$PLUGIN/risk.tsv");
 cmp_ok(scalar @rules, '>=', 10, 'risk.tsv holds the triggers');
 my @cols = map { [ split /\t/ ] } @rules;
-is(scalar(grep { @$_ != 3 || $_->[1] !~ /^(?:path|line)$/ } @cols), 0, 'every rule has a kind, path|line and a pattern');
-is(scalar(grep { !eval { qr/$_->[2]/i; 1 } } @cols), 0, 'every pattern compiles');
+is(scalar(grep { @$_ != 3 || $_->[1] !~ /^(?:path|line|size)$/ || ($_->[1] eq 'size' && $_->[2] !~ /^\d+$/) } @cols), 0, 'every rule has a kind, path|line|size and a pattern (a number for size)');
+is(scalar(grep { $_->[1] ne 'size' && !eval { qr/$_->[2]/i; 1 } } @cols), 0, 'every pattern compiles');
 
 # --- dt risk ---
 new_repo();
@@ -21,7 +21,7 @@ dt('init');
 
 ($rc, $out) = dt('risk');
 is($rc, 0, 'dt risk runs on a clean tree');
-like($out, qr/^risk: no triggers in 0 changed file\(s\)$/, 'and finds nothing');
+like($out, qr/^risk: no triggers in 0 changed file\(s\)$/m, 'and finds nothing');
 
 sh('mkdir -p src/auth src/ui && echo "export const ok = 1;" > src/auth/login.js && echo "{}" > package.json && echo "# notes" > author.md && echo "x" > src/tokenizer.js');
 ($rc, $out) = dt('risk');
@@ -120,7 +120,7 @@ like($o, qr/dt risk planned/, 'orchestrate checks the plan for triggers before b
 like($o, qr/dt risk\b(?! planned)/, 'and the change after it');
 like($o, qr/`security-engineer`/, 'orchestrate spawns the role by its id');
 like($o, qr/`security-engineer` in `design` mode/, 'in design mode, after the Architect');
-like($o, qr/`security-engineer` in `diff` mode first/, 'and in diff mode, before the Reviewer');
+like($o, qr/spawn `security-engineer` \(`diff` mode\)/, 'and in diff mode, as one of the review lenses');
 like($o, qr/`dt close` refuses when `dt risk` lists triggers and no Security Engineer reviewed the goal/, 'the tiny lane cannot close over a trigger without the user (found live: the PM skipped the step)');
 like($o, qr/`dt close --accept-risk --by user`, never without their yes/, 'and only the user accepts it');
 like($o, qr/`security-engineer` returns `STOP`/, 'a STOP from it is an exception stop');

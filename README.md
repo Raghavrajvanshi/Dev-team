@@ -5,12 +5,12 @@
 A goal-gated, token-lean software development team for Claude Code, packaged as the plugin **`devteam`**. It works in any git project.
 
 - A **Goal Keeper** asks you to define the goal first. Nothing is built until you confirm it, and the team stops when the done-criteria are verified by script.
-- A **PM**, an **Architect**, engineers, **QA**, a **Reviewer** and, when a change is risky, a **Security Engineer** are started one at a time, only when a step needs them.
+- A **PM**, an **Architect**, engineers, **QA**, a **Reviewer** and, when a change is risky, a **Security Engineer** are started only when a step needs them: one at a time to build, and side by side for the review of a risky change.
 - The PM suggests the best-fit **lifecycle** (Agile Scrum/Kanban, Waterfall, and more) and you choose.
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (797) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (848) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -137,7 +137,7 @@ Every role is a person with a title. **Names are drawn at random when the team i
 | Software Architect | `architect` | agent |
 | Full-Stack Engineer | `fullstack-engineer` | agent |
 | QA Engineer | `qa-engineer` | agent |
-| Staff Engineer (code review) | `reviewer` | agent |
+| Staff Engineer (code review) | `reviewer` | agent, read-only; one pass, or two lenses (correctness, design) in the review gate |
 | Security Engineer | `security-engineer` | agent, read-only; started when `dt risk` finds a trigger |
 | DevOps Engineer | `devops-engineer` | agent; started for pipeline, container and infrastructure tasks; never deploys |
 | Acceptance Verifier | `goal-verifier` | agent |
@@ -157,6 +157,7 @@ Passing checks is not the same as good work, so the process is built around qual
 5. **Quality is a criterion.** Intake adds a quality criterion for user-facing goals, so "looks good" is verified, not only "pages load". Engineers and the Reviewer think at high effort by default.
 6. **Minimal means no waste, not low ambition.** Size budgets guard against padding and are never a reason to cut design fidelity or content.
 7. **Risky changes get a security look.** `dt risk` (a script, no model call) checks the planned files and the finished diff against the triggers in [`plugins/devteam/risk.tsv`](plugins/devteam/risk.tsv): authentication, payments, secrets, uploads and webhooks, pipelines, dependency manifests and migrations by path, and by added line `eval` and shell calls, unsafe deserialization, string-built SQL, `innerHTML` and disabled TLS checks. When one fires, or the goal's risk is high or regulated, the read-only Security Engineer reviews the design for threats (STRIDE) before code and the diff for exploitable flaws (OWASP Top 10) after it, and reports only what an attacker can reach. A match is a reason to look, not a finding; edit `risk.tsv` to tune it. Pipeline files also route the task to the DevOps Engineer, who writes them as code and checks them locally. This complements, and does not replace, Claude Code's own `security-guidance` plugin and `/security-review`, and the scanners in your CI.
+8. **The review is as big as the risk.** The same script decides the shape of the review: `dt risk` ends with `review: gate` or `review: single pass`. With no trigger, one Reviewer reads the diff. With a trigger, a goal stated as high risk or regulated, or a diff of more than 400 added lines, three independent passes run side by side: the Security Engineer (exploitability), a Reviewer with the correctness lens and a Reviewer with the design lens. The PM merges them into one list (a finding two lenses report at the same lines counts once; HIGH before MEDIUM; at most five NITs; what the diff did not introduce is listed apart and never blocks), an engineer fixes the blocking items, and the next round re-checks only the lenses that had blocking findings, against the fix diff. At most three rounds, then you decide; a security finding is fixed or put to you, never dismissed. The closure report prints what the review passes cost.
 
 ### Lanes and lifecycles
 
@@ -222,6 +223,8 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Confirmed in a fifth live pass** (12 October 2026, same method): a goal under each new lifecycle ran through the PM and closed `verified`: `devops` (done-checks L1 to L3, 8 agents), `v-model` (QA wrote the test plan before the Architect, 9 agents), `spiral` (a risk register with each loop's risks, mitigation and outcome, 7 agents) and `prototype` (2 agents, the file marked disposable). It found three defects, fixed in 0.2.12: the selector treated a signal that was not given as matching any row (it hid behind the missing profiles), the closure report dropped the owner's words on manual checks, and a blanket "yes to everything" was accepted for a check that asks for a decision.
 
+**Confirmed in a sixth live pass** (13 October 2026, same method): a normal goal took the single-pass review (one Reviewer, 4 agents), the same goal stated as high risk took the gate (the Security Engineer and the correctness and design Reviewers in parallel, 5 agents), and an uncommitted file with seeded defects went through the gate, a fix and two re-checks (12 agents): every seeded defect was found by at least two lenses and the goal closed `verified`. It found three older defects, fixed in 0.2.13: the ledger undercounted output tokens, non-ASCII text in a criterion was stored twice-encoded so its check could not pass, and the Reviewer could not see uncommitted work.
+
 **Found and fixed by the first self-test:** a bare skill name can resolve to another installed plugin's skill (our `research` loaded someone else's). The three preloaded skills are now `devteam-craft`, `devteam-research` and `devteam-design-quality`, and PM mode invokes `devteam:orchestrate` and `devteam:goal` by qualified name.
 
 **Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has a blocking finding (every pass so far came back CLEAR; the latest reported real issues only as NOTEs), and the new security close gate on a goal where the user moves up to the standard lane rather than accepting the risk.
@@ -231,7 +234,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 797 tests
+prove tests/                                        # 848 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

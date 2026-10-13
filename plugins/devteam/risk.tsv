@@ -1,6 +1,6 @@
-# Triggers for a security review (read by `dt risk`). Tab-separated: kind, where, pattern (Perl regex, case-insensitive).
-# where: path = the path of a changed or planned file; line = a line the change adds. A match only means "a security
-# engineer should look"; it is not a finding. Edit this file to tune what triggers a review: no code change is needed.
+# Triggers for the security review and the review gate (read by `dt risk`). Tab-separated: kind, where, pattern (Perl regex, case-insensitive).
+# where: path = the path of a changed or planned file; line = a line the change adds; size = the change adds more lines than the number in the third column.
+# A match means "look", never "finding". Edit this file to tune it; a project adds its own rows in .devteam/risk.tsv (a size row there wins).
 auth	path	(?<![a-z])(?:auth|authn|authz|authenticat\w*|authoriz\w*|login|logout|signin|signup|sessions?|oauth\w*|sso|saml|passw\w*|credentials?|permissions?|rbac|acl|jwt|tokens?)(?![a-z])
 payment	path	(?<![a-z])(?:payments?|billing|checkout|invoices?|stripe|paypal|subscriptions?|wallet|refunds?)(?![a-z])
 crypto	path	(?<![a-z])(?:crypto\w*|cipher\w*|encrypt\w*|decrypt\w*|signing|keystore)(?![a-z])
@@ -17,3 +17,4 @@ sql-concat	line	\b(?:select|insert|update|delete)\b.*\b(?:from|into|set|where)\b
 tls-off	line	verify\s*=\s*False|rejectUnauthorized\s*:\s*false|InsecureSkipVerify\s*:\s*true|CURLOPT_SSL_VERIFYPEER\W+(?:false|0)|NODE_TLS_REJECT_UNAUTHORIZED|--insecure\b
 auth-code	line	\b(?:(?:def|function|func|fn|sub)\s+|(?:const|let|var)\s+)(?:log_?in|log_?out|sign_?in|sign_?out|sign_?up|authenticate|authorize|verify_?password|check_?password|set_?password|reset_?password|create_?session|issue_?token)\b
 crypto-api	line	\b(?:hashlib\.(?:scrypt|pbkdf2_hmac|md5|sha1)|bcrypt|argon2|pbkdf2|hmac\.(?:new|digest|compare_digest)|compare_digest|create(?:Hash|Hmac|Cipher|Cipheriv|Decipheriv)|jsonwebtoken|jwt\.(?:sign|encode|verify|decode)|secrets\.token_\w+)\b
+large-diff	size	400

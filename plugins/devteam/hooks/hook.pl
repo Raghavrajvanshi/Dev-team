@@ -4,9 +4,9 @@ use strict;
 use warnings;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
-use JSON::PP;
+use DT qw(jdecode);
 use Hooks;
 
 my $name = shift // die "usage: hook.pl <handler>\n";
 my $raw = do { local $/; <STDIN> } // '';
-Hooks::dispatch($name, eval { decode_json($raw) } // {});
+Hooks::dispatch($name, eval { jdecode($raw) } // {});

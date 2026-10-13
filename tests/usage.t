@@ -61,6 +61,33 @@ my ($t3, $off3) = usage_since($f, $off2);
 is(sum($t3, 'output'), 0, 'an unfinished last line is not counted');
 is($off3, $off2, 'and is not consumed');
 
+# --- the output count grows block by block: a message is counted at its final value (found live: 21 for a 324-token reply) ---
+reset_file();
+put(msg(id => 'g1', out => 2), msg(id => 'g1', out => 324), msg(id => 'g1', out => 324), msg(id => 'g2', out => 8));
+($t) = usage_since($f, 0);
+is(sum($t, 'output'), 332, 'a message whose output grew 2, 324, 324 counts 324, not 2');
+is(sum($t, 'input'), 2, 'and its input once');
+is(sum($t, 'cache_read'), 200, 'and its cache reads once');
+
+# --- a message that straddles two reads: only the growth of its output is added ---
+reset_file();
+put(msg(id => 'm1'), msg(id => 'm2', out => 10));
+($t, $off, $last) = usage_since($f, 0, session => 'S1');
+my ($lout) = (usage_since($f, 0, session => 'S1'))[3];
+is($lout, 10, 'a read reports the output of the last message it saw');
+put(msg(id => 'm2', out => 25), msg(id => 'm3', out => 7));
+($t2) = usage_since($f, $off, session => 'S1', after => $last, after_out => $lout);
+is(sum($t2, 'output'), 22, 'the second read adds m2\'s growth (15) and the new message (7)');
+is(sum($t2, 'cache_read'), 100, 'but not m2\'s input or cache again: only m3\'s');
+($t2) = usage_since($f, $off, session => 'S1', after => $last);
+is(sum($t2, 'output'), 7, 'without the carried output (an older offset file) the straddling message is skipped, as before');
+reset_file();
+put(msg(id => 'only', out => 3));
+($t) = usage_since($f, 0);
+($t2) = usage_since($f, 0, after => 'only:req_only', after_out => 3);
+is(sum($t2, 'output'), 0, 'a message that did not grow adds nothing');
+is(scalar(keys %$t2), 0, 'and leaves no empty entry in the ledger');
+
 # --- messages without ids still count (older or unusual lines) ---
 reset_file();
 put(encode_json({ message => { model => 'm', usage => { output_tokens => 3 } } }), "\n") for 1 .. 2;

@@ -2,6 +2,28 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.13] - 2026-10-13
+Review gate (gap G6): the review is as big as the risk, and a script decides which one applies. Two older defects found by the live pass are fixed.
+### Added
+- **`dt risk` ends with the review that applies**: `review: gate` when it lists a trigger, `review: single pass` when it lists none. `--goal-risk high|regulated|normal` adds the goal's own stated risk as a trigger (`dt risk --goal-risk high`, with or without the word `diff`). A change adding more than 400 lines is a trigger too (`large-diff`, a `size` row in `risk.tsv`; new files count). A project's own `.devteam/risk.tsv` is read after the plugin's.
+- **The review gate.** With `review: gate` the PM spawns, in one message and each with `run_in_background: false`, the Security Engineer (`diff` mode) and two Reviewers, `lens: correctness` and `lens: design`; they run side by side and all three replies come back together. The PM merges them into one list: a finding two lenses report at the same file and lines counts once (highest severity kept, both lenses named), HIGH before MEDIUM, at most five NITs, findings the diff did not introduce (`PRE`) listed apart and never blocking. An engineer fixes the blocking list; the next round re-checks only the lenses that had blocking findings, each given its findings and the fix diff. At most three rounds, then an exception stop. With `review: single pass` it is one Reviewer with no lens, as before; its `RISKY: yes` still starts the Security Engineer. A security FIX is still never dismissed.
+- The Reviewer's reply carries severities (HIGH, MEDIUM, NIT, PRE) and a `RECHECK:` line; the Security Engineer has the same re-check mode.
+- The closure report prints a `review:` line: review passes per role and their `in`, `out`, `cache_read` and `cache_write` tokens, so the gate's price is next to its findings.
+- 51 new tests (848 in all): the gate and single-pass decision, goal risk, the size trigger and the project override, the agents' lens and re-check text, the orchestrate text, the closure line, final-usage counting and non-ASCII round trips.
+### Fixed
+- **Token counts were far too low.** Claude Code writes one transcript line per content block of a message and the output count grows block by block (2, then 1391 for one message); the ledger took the first line (21 tokens for a 324-token reply). A message is now counted at its final value, and a message split across two reads adds only the growth of its output.
+- **Non-ASCII text was stored twice-encoded.** A criterion, goal title or note holding `…`, `é` or any non-ASCII character was written to `.devteam` as `â¦`, and the check command that ran later received garbage, so the criterion could never pass. Seen in two of three live runs (the PM had to repair the check by hand). Strings now stay UTF-8 bytes end to end in `dt` and the hooks (hook input too, so a path with a non-ASCII name matches what git and the shell use).
+- **The Reviewer and the Security Engineer are told to read uncommitted work and new files** (`git diff <base>` and `git status --short`). The Reviewer's wording was `git diff <base>..HEAD`, which shows nothing until the work is committed.
+### Confirmed live (Claude Code 2.1.296, headless, scratch repositories)
+- A normal goal took the single pass: one Reviewer, no lens, `RISKY: no`; closed `verified` with 4 agents.
+- The same goal stated as high risk took the gate: the Security Engineer and both lenses ran in parallel (their stops landed within seconds of each other), all clear with NITs only; `verified`, 5 agents.
+- An uncommitted `export.py` with seeded defects (SQL injection, no authorization check, an off-by-one, unquoted CSV, a duplicated helper, SQL outside `repo.py`) went through the gate: every seeded defect was found by at least two lenses, the Security lens alone found spreadsheet formula injection, and the merged list reached the engineer. Round 2 re-checked all three lenses and found one new MEDIUM (a huge `page` overflowed SQLite); round 3 re-checked the two lenses that still had findings. Closed `verified`.
+### Notes
+- The lens split gave little unique coverage on a one-file change: the correctness and design Reviewers also reported security findings and each other's, although told not to. The merge rule absorbed it; the gate buys independent confirmation more than separate territory. Whether it is worth three agents on small risky changes is a G3 (evals) question.
+- A risky goal with two fix rounds used all 10 standard spawns and the PM stopped to ask (the cap held). The spawn cap is unchanged.
+- Text with non-ASCII characters written by an earlier version stays garbled in old `.devteam` data; re-enter it.
+- The orchestrate skill grew by one step's worth of text; the always-on footprint was not re-measured in this release.
+
 ## [0.2.12] - 2026-10-12
 All eight lifecycles (gap G17): DevOps, V-model, Spiral and Prototype, with done-checks that are really enforced.
 ### Added

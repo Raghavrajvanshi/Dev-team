@@ -10,12 +10,26 @@ use Cwd qw(getcwd abs_path);
 use POSIX qw(strftime setsid);
 use Fcntl qw(:flock);
 use Exporter 'import';
-our @EXPORT_OK = qw(root ddir slurp spit jread jwrite ts true false
+our @EXPORT_OK = qw(root ddir slurp spit jread jwrite jdecode jencode jpretty ts true false
   default_state default_config state_read state_write config_read config_write
   goal_dir protected_files seal check_seal sha_file git_out tree_key run_cmd ledger_add
   locked update_state run_gates usage_since);
 
-my $JSON = JSON::PP->new->canonical->pretty->utf8;
+# Strings stay bytes from end to end: what arrives as UTF-8 (an argument, a file, a hook's input) is stored, shown and
+# run as the same UTF-8 bytes. With ->utf8 an argument holding a single `…` was encoded twice and the check command
+# that ran later was garbage (found live). Characters above 0xFF, which only arrive as \u escapes, are escaped again.
+my $JSON = JSON::PP->new->canonical->pretty->latin1;
+my $RAW  = JSON::PP->new->canonical->latin1;
+# JSON::PP hands back strings flagged as characters; exec and system would then pass their UTF-8 form, which is the
+# double encoding again. Downgrade every string to plain bytes (any above 0xFF stay as they are).
+sub _downgrade {
+    my ($v) = @_;
+    if    (ref $v eq 'HASH')  { for my $k (keys %$v)  { ref $v->{$k} ? _downgrade($v->{$k}) : (defined $v->{$k} && utf8::downgrade($v->{$k}, 1)) } }
+    elsif (ref $v eq 'ARRAY') { for my $e (@$v)       { ref $e       ? _downgrade($e)       : (defined $e       && utf8::downgrade($e, 1)) } }
+}
+sub jdecode { my $d = $RAW->decode($_[0]); _downgrade($d); $d }
+sub jencode { $RAW->encode($_[0]) }
+sub jpretty { $JSON->encode($_[0]) }
 sub true  { JSON::PP::true }
 sub false { JSON::PP::false }
 sub ts    { strftime('%Y-%m-%dT%H:%M:%SZ', gmtime) }
@@ -48,7 +62,7 @@ sub spit {
     close $h;
     rename "$f.tmp.$$", $f or die "cannot rename $f: $!\n";
 }
-sub jread  { my $c = slurp($_[0]); defined $c ? decode_json($c) : undef }
+sub jread  { my $c = slurp($_[0]); defined $c ? jdecode($c) : undef }
 sub jwrite { spit($_[0], $JSON->encode($_[1])) }
 
 sub default_state {
@@ -203,7 +217,7 @@ sub ledger_add {
     my $f = ddir() . '/log.jsonl';
     make_path(dirname($f));
     open my $h, '>>', $f or return;
-    print $h JSON::PP->new->canonical->encode($rec), "\n";
+    print $h jencode($rec), "\n";
     close $h;
 }
 
@@ -232,18 +246,20 @@ sub run_gates {
 }
 
 # Token usage appended to a transcript since byte offset $off. Claude Code writes an assistant message's usage once
-# per content block, so lines are counted once per (message id, request id); with session => ID, lines from another
-# session (history a fork inherited) are skipped; after => KEY ignores the message the previous read ended on.
-# Returns (\%tokens_by_model, new_offset, last_key). Best effort: tolerates unknown line shapes.
+# per content block and the output count grows block by block (2, then 1391 for one message), so a message is counted
+# once per (message id, request id) at the largest value seen. With session => ID, lines from another session (history
+# a fork inherited) are skipped. after => KEY, after_out => N continue a message the previous read ended on: its input
+# and cache were counted then, so only the growth of its output is added.
+# Returns (\%tokens_by_model, new_offset, last_key, last_output). Best effort: tolerates unknown line shapes.
 sub usage_since {
     my ($path, $off, %o) = @_;
     $off //= 0;
-    return ({}, $off, $o{after}) unless defined $path && -f $path;
-    open my $h, '<:raw', $path or return ({}, $off, $o{after});
+    return ({}, $off, $o{after}, $o{after_out}) unless defined $path && -f $path;
+    open my $h, '<:raw', $path or return ({}, $off, $o{after}, $o{after_out});
     $off = 0 if $off > -s $path;
     seek $h, $off, 0;
-    my (%t, %seen, $last);
-    $seen{ $o{after} } = 1 if length($o{after} // '');
+    my (%msg, @order, $last);
+    my @field = qw(input_tokens output_tokens cache_read_input_tokens cache_creation_input_tokens);
     while (my $l = <$h>) {
         last unless $l =~ /\n\z/;
         $off += length $l;
@@ -253,17 +269,24 @@ sub usage_since {
         my $use = ref $m eq 'HASH' ? $m->{usage} : undef;
         next unless ref $use eq 'HASH';
         next if length($o{session} // '') && length($d->{sessionId} // '') && $d->{sessionId} ne $o{session};
-        if (defined $m->{id}) {
-            $last = "$m->{id}:" . ($d->{requestId} // '');
-            next if $seen{$last}++;
-        }
-        my $mod = $m->{model} // 'unknown';
-        $t{$mod}{input} += $use->{input_tokens} // 0;
-        $t{$mod}{output} += $use->{output_tokens} // 0;
-        $t{$mod}{cache_read} += $use->{cache_read_input_tokens} // 0;
-        $t{$mod}{cache_write} += $use->{cache_creation_input_tokens} // 0;
+        my $key = defined $m->{id} ? "$m->{id}:" . ($d->{requestId} // '') : 'anon' . @order;    # no id: counted alone
+        $last = $key if defined $m->{id};
+        my $e = $msg{$key};
+        if (!$e) { push @order, $key; $e = $msg{$key} = { model => $m->{model} // 'unknown' } }
+        for my $f (@field) { my $v = $use->{$f} // 0; $e->{$f} = $v if $v > ($e->{$f} // 0) }
     }
-    return (\%t, $off, $last // $o{after});
+    my %t;
+    for my $k (@order) {
+        my $e = $msg{$k};
+        my ($in, $out, $cr, $cw) = map { $e->{$_} // 0 } @field;
+        if (length($o{after} // '') && $k eq $o{after}) {
+            ($in, $cr, $cw) = (0, 0, 0);
+            $out = defined $o{after_out} && $out > $o{after_out} ? $out - $o{after_out} : 0;
+        }
+        next unless $in || $out || $cr || $cw;
+        $t{ $e->{model} }{$_->[0]} += $_->[1] for [ input => $in ], [ output => $out ], [ cache_read => $cr ], [ cache_write => $cw ];
+    }
+    return (\%t, $off, $last // $o{after}, defined $last ? $msg{$last}{output_tokens} // 0 : $o{after_out});
 }
 
 1;

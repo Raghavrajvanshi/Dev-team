@@ -41,7 +41,7 @@ like($out, qr/DevOps Engineer\s+devops-engineer/, 'the roster lists the role now
 my $o = slurp("$PLUGIN/skills/orchestrate/SKILL.md");
 like($o, qr/`dt risk planned <the task's files>`.*`pipeline:`.*`devops-engineer`/s, 'a task whose files are pipeline files goes to the DevOps Engineer');
 like($o, qr/DEPLOY FACTS/, 'its deploy facts reach the close-out question');
-like($o, qr/a security FIX is never dismissed, on the reviewer's word or yours: it is fixed, or put to the user before `dt close`/, 'a security FIX is fixed or put to the user, never closed over (found live)');
+like($o, qr/a security FIX is never dismissed, on the reviewer's word or yours: it is fixed, or put to the user before `dt close`/i, 'a security FIX is fixed or put to the user, never closed over (found live)');
 like($o, qr/contradicts `design.md`, changes scope or a criterion is an exception stop/, 'a requirement that contradicts the design is an exception stop (found live)');
 
 # --- the guard: nothing that changes a cluster, a cloud account or a registry runs from a subagent ---

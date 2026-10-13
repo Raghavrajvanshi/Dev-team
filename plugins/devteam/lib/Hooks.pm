@@ -12,7 +12,7 @@ use Text::ParseWords qw(shellwords);
 use Exporter 'import';
 our @EXPORT_OK = qw(dispatch);
 
-my $J = JSON::PP->new->canonical;
+my $J = JSON::PP->new->canonical->latin1;    # bytes stay bytes, as in DT.pm
 my %WRITER = map { ("devteam:$_" => 1) } qw(fullstack-engineer backend-engineer frontend-engineer
   mobile-engineer devops-engineer qa-engineer tech-writer);
 # QA reports on the suite instead of making it pass: its acceptance tests are red by design, and in verify mode it
@@ -291,11 +291,12 @@ sub ledger {
         # A subagent's transcript is its own and counted from the start. The main transcript is counted from the
         # baseline `dt engage` took (history before the team existed is not the team's), and only its own session.
         my $of = ddir() . '/ledger.offset.' . ($agent ? "agent-$in->{agent_id}" : "main-$in->{session_id}");
-        my ($off, $key) = (slurp($of) // '') =~ /^(\d+)(?:\t(\S*))?/;
+        my ($off, $key, $kout) = (slurp($of) // '') =~ /^(\d+)(?:\t(\S*)(?:\t(\d+))?)?/;
         $off = -s $path if !defined $off && !$agent;
-        my ($t, $new, $last) = usage_since($path, $off // 0, session => $agent ? undef : $in->{session_id}, after => $key);
+        my ($t, $new, $last, $lout) = usage_since($path, $off // 0, session => $agent ? undef : $in->{session_id},
+            after => $key, after_out => $kout);
         $r{tokens} = $t if %$t;
-        spit($of, "$new\t" . ($last // '') . "\n");
+        spit($of, "$new\t" . ($last // '') . "\t" . ($lout // 0) . "\n");
     }
     ledger_add(\%r);
 }
