@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (1019) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.2.** Unit and CLI tests pass on macOS, Linux and Windows with Git for Windows (1075 tests, run by CI), and the plugin installs cleanly from this repo. The whole flow (intake, research, design, build, review, close) has run end to end, headlessly, in scratch repositories over several live passes; it has not yet been used interactively with your prompts and choices, and not on Windows under Claude Code. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -56,10 +56,10 @@ Or, from inside a Claude Code session:
 Then restart Claude Code (or run `/reload-plugins`) and check it:
 
 ```bash
-claude plugin list        # devteam@devteam-marketplace  Version 0.2.4  enabled
+claude plugin list        # devteam@devteam-marketplace  Version 0.2.x  enabled
 ```
 
-In a session, typing `/devteam:` should list the commands below.
+In a session, typing `/devteam:` should list the commands below, and `/devteam:doctor` checks the whole install (files, hooks, PATH, version) and says how to fix anything that is wrong.
 
 By default the plugin installs for you (`--scope user`) and is available in every project, but it stays **idle until you run `/devteam:start`** in a project. Use `--scope project` to enable it for everyone on one repository.
 
@@ -142,6 +142,7 @@ When work will not fully verify, the PM shows you the unmet criteria and offers:
 | `/devteam:lifecycle [name]` | Show or change the process lifecycle |
 | `/devteam:ask <role> <question>` | One-off consult with a role (read-only) |
 | `/devteam:ask debate <question>` | A short, recorded discussion between the Architect and a second role; the Architect decides and an ADR is written |
+| `/devteam:doctor` | Check the install: files, hooks, PATH, your version against the latest release, and this project's setup; each problem comes with its fix |
 | `/devteam:selftest` | In a scratch repo, check what Claude Code really does with the plugin (see below) |
 
 ### The team
@@ -206,6 +207,7 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 
 | Symptom | What to do |
 |---|---|
+| Not sure what is wrong | `/devteam:doctor` (or `dt doctor` from a terminal; add `--offline` to skip its one request for the latest release). It prints a fix under every problem and changes nothing |
 | Preflight says `FAIL claude-version` | `claude update`, then restart |
 | `FAIL git` or `FAIL clean-tree` | Make an initial commit; commit or stash your changes, then rerun `/devteam:start` |
 | `dt: command not found` | Restart Claude Code or `/reload-plugins`. If it persists, tell Claude to run `dt` by its full path inside the installed plugin folder (`claude plugin list` shows where), and report it |
@@ -256,7 +258,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 1019 tests
+prove tests/                                        # 1075 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

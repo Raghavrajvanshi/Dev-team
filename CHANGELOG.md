@@ -2,6 +2,18 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.16] - 2026-10-14
+Install ergonomics (gap G12): `/devteam:doctor`, and a README status line that is true. The demo and the directory submissions wait for G1 and G4.
+### Added
+- **`dt doctor` and `/devteam:doctor`.** One read-only command that checks the whole install and prints a plain-language `fix:` under every problem: Claude Code's version, the platform, perl and its core modules, git, the plugin's files and line endings, `hooks.json` against the hook handlers that exist, **every hook started the way Claude Code starts it** (in a throwaway project, so a missing `sh`, a broken perl or a CRLF script shows here), whether the `dt` first on PATH is this plugin's, this copy's version against the latest release (one request to GitHub, skipped with `--offline`), what `claude plugin list` says is installed (behind, disabled, in two scopes), and this project's seal and setup. Exit 1 on a FAIL.
+- `tests/doctor.t` (56 tests): a healthy install, then each fault made in a copy of the plugin (a missing file, CRLF, a hook naming no handler, a Hooks.pm that does not compile, an old claude, a native Windows perl, a stale `dt` first on PATH, a newer release, a disabled or doubled install, a tampered or unreadable `.devteam`), `--offline` making no request, and the doctor leaving the real project untouched.
+### Changed
+- **README.** The status line said v0.1 and that the flow had not run end to end; it now says what is true (1075 tests on macOS, Linux and Windows with Git for Windows, headless live passes, never interactive, never on Windows under Claude Code). The commands table and the troubleshooting table lead with `/devteam:doctor`.
+### Notes
+- The doctor found two things on its first run, here: the machine's installed copy was 0.2.3 (the release is 0.2.15), and that stale copy's `dt` came first on PATH, so its old scripts would have run under the new skills. Both are the cases the tool is for.
+- A hook the doctor runs must never touch the real project: its first version let `DT_ROOT` (which a hook obeys before `CLAUDE_PROJECT_DIR`) point the smoke test at the project and a hook re-sealed an edited file. The test that found it is in the suite.
+- Still open in G12, by the register's own order: GitHub topics (your yes), the demo recording and directory submissions (after G1 and G4).
+
 ## [0.2.15] - 2026-10-13
 Windows (gap G14): native Windows with Git for Windows runs the whole offline suite in CI; WSL is documented as the Linux it is.
 ### Added

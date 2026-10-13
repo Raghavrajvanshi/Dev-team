@@ -41,7 +41,7 @@ my %CMD = (
     models => \&c_models, grant => \&c_grant, branch => \&c_branch, status => \&c_status,
     resync => \&c_resync, ledger => \&c_ledger, queue => \&c_queue,
     team => \&c_team, who => \&c_who, shot => \&c_shot, knowledge => \&c_knowledge, trace => \&c_trace,
-    sessions => \&c_sessions, scope => \&c_scope, risk => \&c_risk, discuss => \&c_discuss,
+    sessions => \&c_sessions, scope => \&c_scope, risk => \&c_risk, discuss => \&c_discuss, doctor => \&c_doctor,
 );
 
 my $cmd = shift @ARGV // '';
@@ -1495,6 +1495,219 @@ sub c_discuss {
         return;
     }
     die $usage;
+}
+
+# --- dt doctor: is this install healthy? Read-only (it makes a throwaway project in the temp folder and makes one request
+# to GitHub for the latest release number unless --offline). One line per check, and a plain-language fix under any
+# that is not ok. Hooks are run the way Claude Code runs them, so a missing sh, a broken perl or a CRLF script shows here.
+sub plugin_version { (jread("$PLUGIN/.claude-plugin/plugin.json") // {})->{version} // '' }
+
+sub latest_release {
+    return $ENV{DT_LATEST_RELEASE} if defined $ENV{DT_LATEST_RELEASE};    # tests
+    my $repo = ((jread("$PLUGIN/.claude-plugin/plugin.json") // {})->{repository} // '') =~ m{github\.com/([\w.-]+/[\w.-]+)} ? $1 : return;
+    my $out = `curl -fsS --max-time 6 -H "Accept: application/vnd.github+json" https://api.github.com/repos/$repo/releases/latest 2>/dev/null`;
+    return $out =~ /"tag_name"\s*:\s*"v?(\d+\.\d+\.\d+)"/ ? $1 : undef;
+}
+
+# Run a hook's shell command with $in on stdin and a few seconds to finish. Returns (exit, stdout, stderr).
+sub run_hook_command {
+    my ($cmd, $in, $env, $dir) = @_;
+    my ($fi, $fo, $fe) = map { "$dir/hook.$_" } qw(in out err);
+    spit($fi, $in);
+    spit($fo, '');
+    spit($fe, '');
+    my $pid = fork() // return (-1, '', "fork: $!");
+    if (!$pid) {
+        open STDIN, '<', $fi;
+        open STDOUT, '>', $fo;
+        open STDERR, '>', $fe;
+        $ENV{$_} = $env->{$_} for keys %$env;
+        exec 'sh', '-c', $cmd or exit 127;
+    }
+    my $to = 0;
+    eval { local $SIG{ALRM} = sub { $to = 1; kill 'KILL', $pid; die "timeout\n" }; alarm 20; waitpid($pid, 0); alarm 0 };
+    waitpid($pid, 0) if $to;
+    return ($to ? 124 : $? >> 8, slurp($fo) // '', slurp($fe) // '');
+}
+
+sub c_doctor {
+    my ($o) = opts(@_);
+    my $offline = $o->{offline} || $ENV{DT_OFFLINE} ? 1 : 0;
+    my ($bad, $warn) = (0, 0);
+    my $say = sub {
+        my ($st, $name, $detail, $fix) = @_;
+        $bad++ if $st eq 'FAIL';
+        $warn++ if $st eq 'warn';
+        printf "%-4s %s: %s\n", $st, $name, $detail;
+        print "     fix: $fix\n" if defined $fix && $st ne 'ok' && $st ne 'info';
+    };
+    my $plugin = Cwd::abs_path($PLUGIN) // $PLUGIN;
+    my $version = plugin_version();
+    print "devteam doctor: plugin $version at $plugin\n";
+
+    # --- the machine
+    my $v = $ENV{DT_CLAUDE_VERSION} // (`claude --version 2>/dev/null` =~ /(\d+\.\d+\.\d+)/ ? $1 : '');
+    if (!$v) { $say->('FAIL', 'claude', 'claude is not on PATH', 'install Claude Code (https://code.claude.com/docs/en/setup) and open a new terminal') }
+    elsif (vcmp($v, $MIN_CLAUDE) < 0) { $say->('FAIL', 'claude', "$v is older than $MIN_CLAUDE, which has the hook failure setting the plugin relies on", 'run: claude update, then restart Claude Code') }
+    else { $say->('ok', 'claude', "$v (need >= $MIN_CLAUDE)") }
+    if (is_windows()) {
+        my $os = platform();
+        $os eq 'MSWin32'
+            ? $say->('FAIL', 'platform', 'this is a native Windows perl, which is not supported', "run dt and the hooks with the perl that comes with Git for Windows (open Git Bash), or use WSL")
+            : $say->('ok', 'platform', "Windows with the perl from Git for Windows ($os)");
+    }
+    else { $say->('ok', 'platform', $^O) }
+    my @missing = grep { !eval "require $_; 1" } qw(JSON::PP Digest::SHA File::Temp File::Path File::Basename Cwd POSIX Fcntl Text::ParseWords FindBin);
+    @missing
+        ? $say->('FAIL', 'perl', "$^V is missing core modules: @missing", 'install perl\'s core modules (Debian or Ubuntu: sudo apt install perl-modules; Fedora: sudo dnf install perl-core)')
+        : $say->('ok', 'perl', "$^V with its core modules");
+    my ($git) = `git --version 2>/dev/null` =~ /git version (\S+)/;
+    $git ? $say->('ok', 'git', $git) : $say->('FAIL', 'git', 'git is not on PATH', 'install git (https://git-scm.com/downloads), then open a new terminal');
+
+    # --- the plugin's own files
+    my @need = qw(bin/dt hooks/hook.sh hooks/hook.pl hooks/hooks.json lib/DT.pm lib/Hooks.pm lib/DT/Git.pm lib/DT/Scope.pm
+        lib/DT/Sessions.pm risk.tsv team.tsv names.txt .claude-plugin/plugin.json);
+    my @gone = grep { !-f "$plugin/$_" } @need;
+    my @skills = glob("$plugin/skills/*/SKILL.md");
+    my @agents = glob("$plugin/agents/*.md");
+    my @lifecycles = grep { !m{/_[^/]*$} } glob("$plugin/lifecycles/*.md");
+    if (@gone || !@skills || !@agents) {
+        $say->('FAIL', 'files', 'the plugin folder is incomplete' . (@gone ? ": missing @gone" : ''), 'reinstall it: claude plugin uninstall devteam@devteam-marketplace && claude plugin install devteam@devteam-marketplace, then restart Claude Code');
+    }
+    else { $say->('ok', 'files', scalar(@skills) . ' skills, ' . scalar(@agents) . ' agents, ' . scalar(@lifecycles) . ' lifecycles') }
+    my @crlf = grep { -f "$plugin/$_" && (slurp("$plugin/$_") // '') =~ /\r/ } qw(bin/dt hooks/hook.sh hooks/hook.pl lib/DT.pm lib/Hooks.pm lib/DT/Git.pm lib/DT/Scope.pm lib/DT/Sessions.pm);
+    @crlf
+        ? $say->('FAIL', 'line-endings', "CRLF line endings in @crlf (a script with CRLF does not start)", 'reinstall the plugin; if you cloned it yourself, run: git config core.autocrlf false, delete the clone and clone again')
+        : $say->('ok', 'line-endings', 'LF in every script');
+
+    # --- the hooks: what hooks.json names, and each one run the way Claude Code runs it
+    my $hj = eval { jread("$plugin/hooks/hooks.json") };
+    my (@run, %seen);
+    my $loaded = eval { require Hooks; 1 };
+    my $load_error = $@;
+    if (!$loaded) { $say->('FAIL', 'hooks-code', 'lib/Hooks.pm does not load: ' . (split /\n/, $load_error)[0], 'reinstall the plugin; if you edited it, undo the edit') }
+    if ($loaded && ref $hj eq 'HASH' && ref $hj->{hooks} eq 'HASH') {
+        my %known = map { $_ => 1 } Hooks::handlers();
+        my @unknown;
+        for my $ev (sort keys %{ $hj->{hooks} }) {
+            for my $m (@{ $hj->{hooks}{$ev} }) {
+                for my $h (@{ $m->{hooks} // [] }) {
+                    my $c = $h->{command} // '';
+                    my ($name) = $c =~ m{hook\.sh"? ([a-z-]+)$};
+                    if (!defined $name || !$known{$name}) { push @unknown, "$ev: $c"; next }
+                    push @run, [ $ev, $name, $c ] unless $seen{"$ev $name"}++;
+                }
+            }
+        }
+        @unknown
+            ? $say->('FAIL', 'hooks.json', 'names a hook that does not exist: ' . join('; ', @unknown), 'reinstall the plugin (the plugin folder is from two different versions)')
+            : $say->('ok', 'hooks.json', scalar(@run) . ' hooks, every handler exists');
+    }
+    elsif ($loaded) { $say->('FAIL', 'hooks.json', 'cannot be read', 'reinstall the plugin') }
+    if (@run && eval { require File::Temp; 1 }) {
+        my $tmp = File::Temp::tempdir(CLEANUP => 1);
+        make_path("$tmp/.devteam");
+        my $st = default_state();
+        @$st{qw(engaged owner_session)} = (true, 'doctor');
+        jwrite("$tmp/.devteam/state.json", $st);
+        my %input = (
+            guard => '"tool_name":"Agent","tool_input":{"subagent_type":"Explore"}',
+            'state-protect' => qq{"tool_name":"Write","tool_input":{"file_path":"$tmp/doctor.txt"}},
+            'git-guard' => '"tool_name":"Bash","tool_input":{"command":"git status"}',
+            route => '"prompt":"hello"',
+            'finish-gate' => '"agent_id":"doctor-a","agent_type":"devteam:architect","agent_transcript_path":""',
+            ledger => '"transcript_path":""', 'turn-count' => '"transcript_path":""', trace => '"source":"startup"', 'compact-reinject' => '"source":"compact"',
+        );
+        my (@ok, @fail);
+        for my $r (@run) {
+            my ($ev, $name, $cmd) = @$r;
+            (my $c = $cmd) =~ s/\$\{CLAUDE_PLUGIN_ROOT\}/$plugin/g;
+            my $in = qq({"session_id":"doctor","hook_event_name":"$ev","cwd":"$tmp",) . ($input{$name} // '"x":1') . '}';
+            # DT_ROOT too: a hook obeys it before CLAUDE_PROJECT_DIR, and the doctor must never touch the real project.
+            my ($rc, $out, $err) = run_hook_command($c, $in,
+                { DT_ROOT => $tmp, CLAUDE_PROJECT_DIR => $tmp, CLAUDE_PLUGIN_ROOT => $plugin, DT_CLAUDE_DIR => "$tmp/claude", DT_TRACE => '' }, $tmp);
+            my $json_ok = $out !~ /\S/ || eval { jdecode($out); 1 };
+            # these two always answer in an engaged project; silence means the fast path never saw it (a CRLF script
+            # makes a shell read the state file's name with a CR in it), which is a hook that does nothing, silently
+            my $mute = ($name eq 'route' || $name eq 'compact-reinject') && $out !~ /additionalContext/;
+            if ($rc != 0 || $err =~ /\S/ || !$json_ok || $mute) {
+                my $why = $rc == 127 ? 'the command could not start (is sh on PATH?)' : $rc == 124 ? 'it did not finish in 20 seconds'
+                    : $rc != 0 ? "exit $rc" : $err =~ /\S/ ? 'it wrote to stderr' : !$json_ok ? 'its output is not JSON'
+                    : 'it said nothing in an engaged project, so it does not see the project (CRLF line endings?)';
+                push @fail, "$ev/$name ($why" . ($err =~ /\S/ ? ': ' . (split /\n/, $err)[0] : '') . ')';
+            }
+            else { push @ok, $name }
+        }
+        @fail
+            ? $say->('FAIL', 'hooks-run', 'did not run cleanly: ' . join('; ', @fail), 'check the lines above first; then reinstall the plugin. If sh or perl is missing, install it (on Windows: Git for Windows) and restart Claude Code')
+            : $say->('ok', 'hooks-run', scalar(@ok) . ' hooks started and answered cleanly: ' . join(' ', sort keys %{{ map { $_ => 1 } @ok }}));
+    }
+
+    # --- dt on PATH
+    my $onpath = `sh -c 'command -v dt' 2>/dev/null`;
+    chomp $onpath;
+    if (!length $onpath) {
+        $say->('warn', 'dt', 'dt is not on PATH in this shell', 'inside Claude Code the plugin\'s bin/ joins PATH once it is loaded: restart Claude Code or run /reload-plugins; run dt by its full path until then: ' . "$plugin/bin/dt");
+    }
+    elsif ((Cwd::abs_path($onpath) // $onpath) ne "$plugin/bin/dt" && (Cwd::abs_path($onpath) // $onpath) ne (Cwd::abs_path("$plugin/bin/dt") // '')) {
+        $say->('FAIL', 'dt', "another dt comes first on PATH: $onpath (this plugin's is $plugin/bin/dt)", 'an older dt runs old scripts under the new skills: remove it or put this plugin\'s bin/ first on PATH');
+    }
+    else { $say->('ok', 'dt', "resolves to this plugin's bin/dt") }
+
+    # --- versions: what runs, what is installed, what is released
+    my $latest = $offline ? undef : latest_release();
+    if ($offline) { $say->('info', 'latest-release', 'not checked (--offline)') }
+    elsif (!defined $latest) { $say->('info', 'latest-release', 'could not reach GitHub; run again with a network, or --offline to skip') }
+    elsif (vcmp($version, $latest) < 0) {
+        $say->('warn', 'version', "this copy is $version and $latest is released",
+            'run: claude plugin marketplace update devteam-marketplace && claude plugin update devteam@devteam-marketplace, then restart Claude Code');
+    }
+    elsif (vcmp($version, $latest) > 0) { $say->('ok', 'version', "$version is ahead of the latest release $latest (a development copy)") }
+    else { $say->('ok', 'version', "$version is the latest release") }
+    my $listing = $ENV{DT_PLUGIN_LIST_JSON} ? slurp($ENV{DT_PLUGIN_LIST_JSON}) : `claude plugin list --json 2>/dev/null`;
+    my $inst = eval { jdecode($listing) };
+    if (ref $inst eq 'ARRAY') {
+        my @mine = grep { ref $_ eq 'HASH' && ($_->{id} // '') =~ /^devteam@/ } @$inst;
+        if (!@mine) { $say->('info', 'installed', 'this copy is not installed as a plugin (it runs from ' . $plugin . ')') }
+        for my $p (@mine) {
+            my $where = "$p->{id} $p->{version} ($p->{scope} scope" . ($p->{enabled} ? '' : ', disabled') . ')';
+            if (!$p->{enabled}) { $say->('warn', 'installed', "$where is installed but disabled", "run: claude plugin enable $p->{id}") }
+            elsif (defined $latest && vcmp($p->{version}, $latest) < 0) {
+                $say->('warn', 'installed', "$where is behind the latest release $latest",
+                    'run: claude plugin marketplace update devteam-marketplace && claude plugin update ' . $p->{id} . ', then restart Claude Code');
+            }
+            elsif ($p->{version} ne $version) { $say->('info', 'installed', "$where; this session runs $version from $plugin") }
+            else { $say->('ok', 'installed', $where) }
+        }
+        if (@mine > 1) {
+            $say->('warn', 'installed', 'devteam is installed in ' . scalar(@mine) . ' scopes (' . join(', ', map { $_->{scope} } @mine) . '): its hooks may run twice',
+                'keep one: claude plugin uninstall devteam@devteam-marketplace --scope <scope>');
+        }
+    }
+    else { $say->('info', 'installed', 'could not read the plugin list (claude plugin list --json)') }
+
+    # --- this project
+    my $root = root();
+    my ($s, $cfg, @tamper);
+    my $readable = !-f "$root/.devteam/state.json" || eval { $s = state_read(); $cfg = config_read(); @tamper = @{ check_seal() }; 1 };
+    if (!$readable) {
+        $say->('FAIL', 'project', "devteam's state or config in $root/.devteam cannot be read: " . ((split /\n/, $@)[0] // ''),
+            'restore state.json and config.json from a backup (they are plain JSON), or move .devteam aside and run /devteam:start again; until then the hooks fail and the spawn guard blocks agents');
+    }
+    elsif (-f "$root/.devteam/state.json") {
+        $say->(@tamper ? 'FAIL' : 'ok', 'project', "devteam at $root: " . ($s->{engaged} ? "engaged, status $s->{status}" : 'not engaged')
+            . (length $s->{goal} ? ", goal $s->{goal}" : '') . (@tamper ? "; protected files changed outside dt: @tamper" : ''),
+            'review those files, then run: dt resync');
+        my @setup = ($cfg->{models_chosen} ? () : 'models not chosen', -f "$root/.devteam/profile.md" ? () : 'no project profile', -f "$root/.devteam/standards.md" ? () : 'no standards');
+        @setup ? $say->('warn', 'setup', 'incomplete (' . join('; ', @setup) . ')', 'run /devteam:start; setup runs once') : $say->('ok', 'setup', 'complete');
+        my $ready = allow_ready();
+        $say->($ready eq 'yes' ? 'ok' : 'info', 'unattended', $ready);
+    }
+    else { $say->('info', 'project', "devteam has not been started in $root (run /devteam:start)") }
+
+    print $bad ? "$bad problem(s)" . ($warn ? " and $warn warning(s)" : '') . ": fix the FAIL lines first\n"
+        : $warn ? "no problems, $warn warning(s)\n" : "all checks passed\n";
+    $EXIT = 1 if $bad;
 }
 
 sub c_queue {

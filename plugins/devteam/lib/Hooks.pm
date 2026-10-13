@@ -10,7 +10,7 @@ use DT::Git qw(classify segments);
 use DT::Sessions qw(live_others note_other lease_touch acked);
 use Text::ParseWords qw(shellwords);
 use Exporter 'import';
-our @EXPORT_OK = qw(dispatch);
+our @EXPORT_OK = qw(dispatch handlers);
 
 my $J = JSON::PP->new->canonical->latin1;    # bytes stay bytes, as in DT.pm
 my %WRITER = map { ("devteam:$_" => 1) } qw(fullstack-engineer backend-engineer frontend-engineer
@@ -49,6 +49,8 @@ my %H = (
     'finish-gate' => \&finish_gate, 'turn-count' => \&turn_count, 'compact-reinject' => \&compact_reinject,
     ledger => \&ledger, trace => sub { },
 );
+
+sub handlers { sort keys %H }    # for `dt doctor`: what hooks.json may name
 
 sub dispatch {
     my ($name, $in) = @_;
