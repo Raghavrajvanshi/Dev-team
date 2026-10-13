@@ -1,0 +1,8 @@
+# Every checkout gets LF line endings, whatever core.autocrlf says. A script with CRLF line endings
+# fails to start (`#!/bin/sh^M: bad interpreter`), and Git for Windows turns autocrlf on by default.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary

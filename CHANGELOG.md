@@ -2,6 +2,26 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.15] - 2026-10-13
+Windows (gap G14): native Windows with Git for Windows runs the whole offline suite in CI; WSL is documented as the Linux it is.
+### Added
+- **A CI job on `windows-latest`** runs the offline suite under Git for Windows' own perl, one file at a time (that perl has no `prove`), next to the Ubuntu and macOS jobs. All 19 files pass (1,019 tests).
+- **`.gitattributes`**: every checkout gets LF line endings, whatever `core.autocrlf` says. Git for Windows turns it on by default, and a script with CRLF does not start (`#!/bin/sh^M`).
+- **One spelling per path.** Claude Code hands hooks Windows paths (`C:\Users\me\proj\x.py`) and Git for Windows' perl works in `/c/Users/me/proj`, so a prefix test between them missed: a subagent write to `.devteam\state.json` through a backslash path was not refused. Every path in a hook's input, `CLAUDE_PROJECT_DIR` and the session registry is converted first; macOS and Linux are untouched.
+- `dt preflight` names the platform on Windows and refuses a native Windows perl (Strawberry or ActiveState: no `setsid`, a different `fork`).
+- `dt shot` finds Chrome or Edge in the usual Windows folders and falls back to `python` when there is no `python3`.
+- A live Claude Code process is looked up by its Windows pid (`ps -W`), because `kill` cannot see it from Git for Windows' perl.
+- `tests/windows.t` (52 tests): the path spellings, CRLF under a lock, hooks given backslash paths, Chrome discovery, the hook file's shape, and, on a Windows perl only, the Windows pid lookup.
+### Changed
+- **Hooks are shell commands now** (`sh "${CLAUDE_PLUGIN_ROOT}/hooks/hook.sh" guard`) instead of exec form with `sh` as the program. Exec form needs `sh` on the Windows PATH, which Git for Windows does not set by default; a shell command runs in Git Bash, which finds `sh` itself. Confirmed live on macOS: the self-test confirms 14 checks, none refuted, through the new form.
+- A locked acceptance test holds when its bytes match or when they match after normalising line endings to LF or CRLF; any other difference is still a violation.
+### Fixed
+- `dt sessions` treated a path under a folder that does not exist as different from the same path under the root, on Windows (a removed worktree, a subfolder not made yet); the nearest existing folder is now canonicalised.
+### Notes
+- **Not run live under Claude Code on Windows.** The suite proves the scripts and the hook handlers fed the path forms Claude Code is documented to send; what Claude Code really sends, how it starts Git Bash, and Chrome, Edge and the session registry on a desktop are unobserved.
+- Without Git for Windows the hooks cannot start, and the fail-closed spawn guard should then block the Agent tool in every project while the plugin is enabled (the hook documentation says a hook that cannot start is a failure). Not observed; `claude plugin disable devteam@devteam-marketplace` switches it off.
+- WSL has no job of its own: it is Linux, which the Ubuntu job covers.
+
 ## [0.2.14] - 2026-10-13
 Bounded discussion (gap G18): a contested decision gets a short, recorded, mediated exchange and an ADR, only when a trigger fired. Two older defects found by the live pass are fixed.
 ### Added

@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.1 (core loop).** Unit and CLI tests pass (967) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.1 (core loop).** Unit and CLI tests pass (1019) and the plugin installs cleanly from this repo, and a first live run confirmed the plugin loads and `/devteam:start` works through preflight, init and engage. The rest of the flow has not yet been exercised end to end. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -35,7 +35,7 @@ Diagrams are generated from [`docs/images/generate.py`](docs/images/generate.py)
 |---|---|---|
 | Claude Code **2.1.295 or newer** | `claude --version` | Older versions lack the hook failure setting the plugin relies on. Update with `claude update`. |
 | `git` | `git --version` | The project must be a git repo with at least one commit. |
-| Perl 5 with core modules | `perl -MJSON::PP -MDigest::SHA -e1` (prints nothing when fine) | Preinstalled on macOS and most Linux. Windows is not supported yet. |
+| Perl 5 with core modules | `perl -MJSON::PP -MDigest::SHA -e1` (prints nothing when fine) | Preinstalled on macOS and most Linux. On Windows it is the perl inside Git for Windows (see [Windows](#windows)). |
 
 ## Install
 
@@ -78,6 +78,23 @@ claude plugin update devteam@devteam-marketplace     # restart Claude Code to ap
 claude plugin disable devteam@devteam-marketplace    # switches every hook off
 claude plugin uninstall devteam@devteam-marketplace
 ```
+
+### Windows
+
+| Where you run Claude Code | Status |
+|---|---|
+| macOS, Linux | Supported. CI runs the offline suite on both. |
+| WSL 2 or WSL 1 | Supported: it is Linux, covered by the Linux job (no separate WSL job). Keep the project inside the WSL filesystem, not under `/mnt/c`. |
+| Native Windows with [Git for Windows](https://git-scm.com/downloads/win) | Supported with the limits below. CI runs the whole offline suite on a Windows runner under Git for Windows' own perl. It has not been run live under Claude Code on Windows (see below). |
+| Native Windows without Git for Windows (PowerShell only) | Not supported: the hooks and `dt` need Git Bash and its perl. |
+
+On native Windows Claude Code runs a plugin hook's shell command in Git Bash, which also brings the perl the team's scripts run on, so one implementation serves every platform. The plugin's hooks are written so that Git Bash resolves `sh` itself (no PATH setup), and `.gitattributes` keeps every script on LF line endings whatever `core.autocrlf` says (a script with CRLF does not start). If Claude Code cannot find Git Bash, set `CLAUDE_CODE_GIT_BASH_PATH` in its settings.
+
+What the plugin does for Windows: paths Claude Code hands the hooks (`C:\Users\me\proj\x.py`) are converted to the spelling of Git's perl before any comparison, so state protection, scope and session detection see one spelling; a locked acceptance test survives git rewriting its line endings (`core.autocrlf`) while a real change is still a violation; `dt shot` also looks for Chrome and Edge in the usual Windows folders (set `DT_CHROME` otherwise) and falls back to `python`; a live Claude Code process is looked up by its Windows pid; `dt preflight` names the platform and refuses a native Windows perl.
+
+**Without Git for Windows,** the hooks cannot start. The spawn guard is fail-closed by design (`onFailure: "block"`), and Claude Code documents a hook that cannot start as a failure, so it should block the Agent tool in every project while the plugin is enabled. That is what the hook documentation says would happen; it has not been observed. `claude plugin disable devteam@devteam-marketplace` switches it off.
+
+**Not verified:** Claude Code on Windows has not run this plugin live. The suite proves the scripts and the hook handlers, fed the path forms Claude Code is documented to send; it cannot show what Claude Code really sends, how it starts Git Bash, or Chrome, Edge and the session registry on a real desktop. If you run it on Windows, `/devteam:selftest` in a scratch repository settles the hook behaviour, and its report is the most useful thing you can send.
 
 ## Use it
 
@@ -194,6 +211,7 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 | `dt: command not found` | Restart Claude Code or `/reload-plugins`. If it persists, tell Claude to run `dt` by its full path inside the installed plugin folder (`claude plugin list` shows where), and report it |
 | Goal is `BLOCKED` | `/devteam:status` shows why. Resolve it and run `/devteam:start` to resume, or `/devteam:stop` |
 | The team is in the way of normal work | `/devteam:stop`, or `claude plugin disable devteam@devteam-marketplace` |
+| On Windows: `sh` or `perl` not found, hooks fail, or `FAIL platform` | Install Git for Windows and restart Claude Code; run `dt` from Git Bash, not PowerShell ([Windows](#windows)) |
 
 ## Check your install: the self-test
 
@@ -233,12 +251,12 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 
 **Still unverified live:** the interactive question prompts (headless runs have no `AskUserQuestion`, so intake was answered as text); the user-facing quality loop (researcher, designer, screenshots, polish); several engineers and worktrees; and the Security Engineer on a diff that has a blocking finding (every pass so far came back CLEAR; the latest reported real issues only as NOTEs), and the new security close gate on a goal where the user moves up to the standard lane rather than accepting the risk.
 
-**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/Writer roles are planned. The Security Engineer has run live several times (see above), but never on a diff with a blocking finding. `dt close` itself now stops a change that trips a security trigger and was not reviewed, until you accept it. macOS and Linux only.
+**v0.1 limits:** engineers run one at a time (no worktrees or parallelism yet); onboarding is an inline scan; backend/frontend/mobile/Writer roles are planned. The Security Engineer has run live several times (see above), but never on a diff with a blocking finding. `dt close` itself now stops a change that trips a security trigger and was not reviewed, until you accept it. Native Windows needs Git for Windows and has not been run live (see [Windows](#windows)).
 
 ## Develop
 
 ```bash
-prove tests/                                        # 967 tests
+prove tests/                                        # 1019 tests
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

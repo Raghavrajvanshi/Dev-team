@@ -15,7 +15,7 @@ mkdir "$CLAUDE/sessions";
 @ENV{qw(DT_CLAUDE_DIR DT_TRANSCRIPT_DIR)} = ($CLAUDE, $TRANS);
 delete $ENV{DT_LIVE_SECS};
 my ($rc, $out);
-my ($ALIVE_A, $ALIVE_B, $ALIVE_C, $DEAD) = ($$, getppid(), 1, 2147483646);    # pid 1 answers EPERM: alive but not ours
+my ($ALIVE_A, $ALIVE_B, $ALIVE_C, $DEAD) = ($$, getppid(), ($^O =~ /^(?:msys|cygwin|MSWin32)$/ ? getppid() : 1), 2147483646);    # pid 1 answers EPERM: alive but not ours (there is no pid 1 under MSYS)
 my $n = 100;
 sub reg {    # a registry entry as Claude Code writes it
     my ($id, %f) = @_;

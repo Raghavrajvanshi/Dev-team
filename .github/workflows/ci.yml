@@ -25,6 +25,37 @@ jobs:
       - name: Offline test suite
         run: prove tests/
 
+  windows:
+    name: tests (windows, Git Bash)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (Git for Windows ships its own sh and perl)
+        run: |
+          uname -a
+          command -v git sh perl
+          perl -v | sed -n 2p
+          git --version
+          git config --get core.autocrlf || true
+      - name: Offline test suite, one file at a time
+        run: |
+          # Git for Windows' perl has no prove, so each file runs on its own and any failure fails the job
+          set +e
+          fail=0
+          for t in tests/*.t; do
+            out=$(perl "$t" 2>&1); rc=$?
+            if [ $rc -eq 0 ]; then echo "ok      $t ($(printf '%s\n' "$out" | grep -c '^ok') tests)"
+            else
+              fail=1
+              echo "FAILED  $t (exit $rc)"
+              printf '%s\n' "$out" | grep -E '^(not ok|# |Bail|Can.t |.* at .* line [0-9]+)' | head -40
+            fi
+          done
+          exit $fail
+
   validate:
     name: plugin validation
     runs-on: ubuntu-latest

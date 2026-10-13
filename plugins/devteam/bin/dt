@@ -7,8 +7,8 @@ use lib "$FindBin::Bin/../lib";
 use JSON::PP;
 use File::Path qw(make_path);
 use DT qw(root ddir slurp spit jread jwrite jdecode jencode jpretty ts true false default_state default_config state_read state_write
-  config_read config_write goal_dir seal check_seal sha_file git_out tree_key run_cmd ledger_add
-  locked update_state run_gates);
+  config_read config_write goal_dir seal check_seal sha_file lock_ok git_out tree_key run_cmd ledger_add
+  locked update_state run_gates native_path is_windows platform);
 use DT::Sessions qw(live_others holder_status lease_write foreign_writes ack acked probe transcript_file);
 use DT::Scope ();
 
@@ -206,7 +206,14 @@ sub run_argv {
 sub find_chrome {
     return $ENV{DT_CHROME} if $ENV{DT_CHROME} && -x $ENV{DT_CHROME};
     for my $p ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium') { return $p if -x $p }
-    for my $n (qw(google-chrome google-chrome-stable chromium chromium-browser chrome)) {
+    # Windows: Chrome or Edge (it is Chromium and takes the same flags) in the usual install folders.
+    for my $v (grep { defined && length } @ENV{ 'ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA', 'ProgramW6432' }) {
+        my $d = native_path($v);
+        for my $rel ('Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe', 'Chromium/Application/chrome.exe') {
+            return "$d/$rel" if -x "$d/$rel";
+        }
+    }
+    for my $n (qw(google-chrome google-chrome-stable chromium chromium-browser chrome chrome.exe msedge.exe)) {
         for my $d (split /:/, $ENV{PATH} // '') { return "$d/$n" if -x "$d/$n" }
     }
     return;
@@ -224,12 +231,13 @@ sub c_shot {
     $name =~ s/\.html?$//;
     my $dir = (goal_dir() ? goal_dir() . '/evidence/shots' : ddir() . '/shots');
     make_path($dir);
-    my ($url, $srv) = ($target);
+    my ($url, $srv, $py) = ($target);
     if (defined $o->{serve} && $o->{serve} ne '1') {
-        die "dt: --serve needs python3\n" unless grep { -x "$_/python3" } split /:/, $ENV{PATH};
+        $py = (grep { my $n = $_; grep { -x "$_/$n" } split /:/, $ENV{PATH} } qw(python3 python))[0]    # `python` is what Windows installs
+            or die "dt: --serve needs python3\n";
         my $port = 20000 + int(rand(20000));
         $srv = fork() // die "fork: $!\n";
-        if (!$srv) { open STDOUT, '>', '/dev/null'; open STDERR, '>&', \*STDOUT; exec 'python3', '-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $o->{serve} or exit 127 }
+        if (!$srv) { open STDOUT, '>', '/dev/null'; open STDERR, '>&', \*STDOUT; exec $py, '-m', 'http.server', $port, '--bind', '127.0.0.1', '--directory', $o->{serve} or exit 127 }
         require IO::Socket::INET;
         for (1 .. 30) { last if IO::Socket::INET->new(PeerAddr => '127.0.0.1', PeerPort => $port, Timeout => 1); select undef, undef, undef, 0.1 }
         (my $path = $target) =~ s{^/}{};
@@ -414,6 +422,12 @@ sub c_preflight {
     $add->($head ? 'ok' : 'FAIL', 'git', $head ? 'repository with at least one commit' : 'not a git repository with a commit (offer: git init + initial commit)');
     my $dirty = $head ? git_out($root, 'status', '--porcelain', '--', '.', @NOISE) : '';
     $add->($dirty eq '' ? 'ok' : 'FAIL', 'clean-tree', $dirty eq '' ? 'working tree clean' : 'uncommitted changes: ' . (split /\n/, $dirty)[0] . ' ...');
+    if (is_windows()) {
+        my $os = platform();
+        $add->($os eq 'MSWin32' ? 'FAIL' : 'ok', 'platform', $os eq 'MSWin32'
+            ? "native Windows perl ($os): not supported; run dt and the hooks with Git for Windows' perl (Git Bash)"
+            : "Windows, perl from Git for Windows ($os)");
+    }
     for my $f ("$PLUGIN/bin/dt", "$PLUGIN/hooks/hook.sh") {
         $add->(-x $f ? 'ok' : 'FAIL', 'executable', $f =~ s{.*/}{}r . (-x $f ? '' : ' missing or not executable'));
     }
@@ -642,7 +656,7 @@ sub verify_all {
     my $to = config_read()->{gates}{timeout} || 300;
     my (@viol, @pending);
     my $pass = 0;
-    for my $file (sort keys %{ $c->{locks} }) { push @viol, $file if sha_file("$root/$file") ne $c->{locks}{$file} }
+    for my $file (sort keys %{ $c->{locks} }) { push @viol, $file unless lock_ok("$root/$file", $c->{locks}{$file}) }
     for my $cr (@{ $c->{criteria} }) {
         if ($cr->{type} eq 'cmd') {
             my $ev = goal_file("evidence/crit-$cr->{id}-$key.json");

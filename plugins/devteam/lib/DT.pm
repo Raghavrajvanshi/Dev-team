@@ -12,8 +12,8 @@ use Fcntl qw(:flock);
 use Exporter 'import';
 our @EXPORT_OK = qw(root ddir slurp spit jread jwrite jdecode jencode jpretty ts true false
   default_state default_config state_read state_write config_read config_write
-  goal_dir protected_files seal check_seal sha_file git_out tree_key run_cmd ledger_add
-  locked update_state run_gates usage_since);
+  goal_dir protected_files seal check_seal sha_file lock_ok git_out tree_key run_cmd ledger_add
+  locked update_state run_gates usage_since native_path win_path is_windows platform);
 
 # Strings stay bytes from end to end: what arrives as UTF-8 (an argument, a file, a hook's input) is stored, shown and
 # run as the same UTF-8 bytes. With ->utf8 an argument holding a single `…` was encoded twice and the check command
@@ -34,9 +34,41 @@ sub true  { JSON::PP::true }
 sub false { JSON::PP::false }
 sub ts    { strftime('%Y-%m-%dT%H:%M:%SZ', gmtime) }
 
+# Windows. Claude Code hands its hooks Windows paths (C:\Users\me\proj\x.py) while the perl that ships with Git for
+# Windows (MSYS, $^O is 'msys') works in /c/Users/me/proj, so a prefix test between the two silently misses. Every path
+# that comes from outside is put in the spelling this perl uses; on macOS and Linux nothing changes. DT_PLATFORM
+# stands in for $^O in tests.
+sub platform {
+    return $ENV{DT_PLATFORM} if $ENV{DT_PLATFORM};
+    # Git for Windows' perl is built from Cygwin's port, so $^O says 'cygwin' there, but its drives are /c, not /cygdrive/c.
+    return $^O eq 'cygwin' && !-d '/cygdrive' ? 'msys' : $^O;
+}
+sub is_windows { platform() =~ /^(?:msys|cygwin|MSWin32)$/ ? 1 : 0 }
+sub native_path {
+    my ($p, $os) = @_;
+    $os //= platform();
+    return $p unless defined $p && length $p && $os =~ /^(?:msys|cygwin|MSWin32)$/;
+    $p =~ s{\\}{/}g;
+    my $drive = $os eq 'cygwin' ? qr{^/cygdrive/([A-Za-z])(?=/|$)} : qr{^/(?:cygdrive/)?([A-Za-z])(?=/|$)};    # /c/x (MSYS) or /cygdrive/c/x
+    if ($p =~ $drive) { my ($d, $rest) = ($1, substr($p, $+[0])); $p = $os eq 'MSWin32' ? uc($d) . ':' . $rest : ($os eq 'cygwin' ? '/cygdrive/' : '/') . lc($d) . $rest }
+    elsif ($p =~ m{^([A-Za-z]):(?=/|$)}) { my ($d, $rest) = ($1, substr($p, 2)); $p = $os eq 'MSWin32' ? uc($d) . ':' . $rest : ($os eq 'cygwin' ? '/cygdrive/' : '/') . lc($d) . $rest }
+    return $p;
+}
+# The Windows spelling of a path, for the one place that must match Claude Code's own (its transcript folder names).
+sub win_path {
+    my ($p) = @_;
+    return $p unless defined $p;
+    $p =~ s{^/(?:cygdrive/)?([A-Za-z])(?=/|$)}{uc($1) . ':'}e;
+    $p =~ s{/}{\\}g if $p =~ /^[A-Za-z]:/;
+    return $p;
+}
+
 sub root {
-    return $ENV{DT_ROOT} if $ENV{DT_ROOT};
-    return $ENV{CLAUDE_PROJECT_DIR} if $ENV{CLAUDE_PROJECT_DIR} && -d "$ENV{CLAUDE_PROJECT_DIR}/.devteam";
+    return native_path($ENV{DT_ROOT}) if $ENV{DT_ROOT};
+    if ($ENV{CLAUDE_PROJECT_DIR}) {
+        my $c = native_path($ENV{CLAUDE_PROJECT_DIR});
+        return $c if -d "$c/.devteam";
+    }
     my $d = getcwd();
     while (1) {
         return $d if -d "$d/.devteam";
@@ -140,6 +172,22 @@ sub sha_file {
     my $d = Digest::SHA->new(256)->addfile($h)->hexdigest;
     close $h;
     return $d;
+}
+# Does a locked file still hold what was locked? Git for Windows turns core.autocrlf on, so a checkout rewrites a file's
+# line endings without anyone changing it: a lock holds when the file matches byte for byte, or after normalising its
+# line endings to LF or to CRLF. Any other difference is a change.
+sub lock_ok {
+    my ($f, $want) = @_;
+    open my $h, '<:raw', $f or return 0;
+    local $/;
+    my $c = <$h>;
+    close $h;
+    $c //= '';
+    return 1 if Digest::SHA::sha256_hex($c) eq $want;
+    (my $lf = $c) =~ s/\r\n/\n/g;
+    return 1 if $lf ne $c && Digest::SHA::sha256_hex($lf) eq $want;
+    (my $crlf = $lf) =~ s/\n/\r\n/g;
+    return $crlf ne $c && Digest::SHA::sha256_hex($crlf) eq $want ? 1 : 0;
 }
 sub seal {
     locked(sub {

@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use JSON::PP;
 use DT qw(root ddir slurp spit jread ts ledger_add state_read state_write update_state config_read check_seal seal
-  goal_dir git_out run_gates usage_since locked);
+  goal_dir git_out run_gates usage_since locked native_path);
 use DT::Git qw(classify segments);
 use DT::Sessions qw(live_others note_other lease_touch acked);
 use Text::ParseWords qw(shellwords);
@@ -57,6 +57,11 @@ sub dispatch {
     return unless $st->{engaged};
     my $agent = length($in->{agent_id} // '') ? 1 : 0;
     my $owned = ($st->{owner_session} // '') eq ($in->{session_id} // '') ? 1 : 0;
+    # Windows: every path Claude Code sends is put in this perl's spelling first (see DT::native_path); a no-op elsewhere.
+    for my $k (qw(cwd transcript_path agent_transcript_path)) { $in->{$k} = native_path($in->{$k}) if defined $in->{$k} && !ref $in->{$k} }
+    if (ref $in->{tool_input} eq 'HASH') {
+        for my $k (qw(file_path notebook_path path)) { $in->{tool_input}{$k} = native_path($in->{tool_input}{$k}) if defined $in->{tool_input}{$k} && !ref $in->{tool_input}{$k} }
+    }
     ($TRACE, $CUR) = (trace_on(), $name);
     trace({ event => $in->{hook_event_name}, agent => $agent, owned => $owned, status => $st->{status}, input => shrink($in) });
     # Main-thread events belong to the owning session only; subagent calls always belong to the engaged team.

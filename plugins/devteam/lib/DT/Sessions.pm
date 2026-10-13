@@ -8,16 +8,37 @@ package DT::Sessions;
 use strict;
 use warnings;
 use Cwd qw(abs_path);
-use DT qw(root ddir jread jwrite slurp spit locked config_read);
+use DT qw(root ddir jread jwrite slurp spit locked config_read native_path win_path is_windows);
 use Exporter 'import';
 our @EXPORT_OK = qw(live_others holder_status lease_write lease_touch note_other foreign_writes ack acked probe transcript_file);
 
 sub ttl        { $ENV{DT_LIVE_SECS} // config_read()->{sessions}{live_secs} // 1800 }
 sub claude_dir { $ENV{DT_CLAUDE_DIR} // $ENV{CLAUDE_CONFIG_DIR} // ($ENV{HOME} // '') . '/.claude' }
-sub real       { my $p = shift; abs_path($p) // $p }
+# The canonical form of a path, also when its last parts do not exist (a removed worktree, a folder not made yet): the
+# nearest folder that exists is canonicalised and the rest is appended. abs_path refuses such a path on Windows.
+sub real {
+    my $p = shift;
+    my ($tail, $d) = ('', $p);
+    while (1) {
+        my $r = abs_path($d);
+        return $tail eq '' ? $r : $r eq '/' ? "/$tail" : "$r/$tail" if defined $r;
+        $d =~ s{/+$}{};
+        last unless $d =~ s{/([^/]+)$}{};
+        $tail = $tail eq '' ? $1 : "$1/$tail";
+        $d = '/' if $d eq '';
+    }
+    return $p;
+}
 sub store      { ddir() . '/sessions.json' }
 sub read_store { eval { jread(store()) } // {} }
-sub pid_alive  { my $p = shift; ($p // '') =~ /^\d+$/ && (kill(0, $p) || $!{EPERM}) ? 1 : 0 }
+sub pid_alive {
+    my $p = shift;
+    return 0 unless ($p // '') =~ /^\d+$/;
+    return 1 if kill(0, $p) || $!{EPERM};
+    return is_windows() ? win_pid($p) : 0;
+}
+# Claude Code is a Windows process, which kill cannot see from Git for Windows' perl; `ps -W` lists those with their Windows pid.
+sub win_pid { my $p = shift; (`ps -W 2>/dev/null` // '') =~ /^\s*\S+\s+\S+\s+\S+\s+\Q$p\E\s/m ? 1 : 0 }
 
 # A session shares our working tree when it runs in this checkout or below it, not in an isolated worktree of it.
 sub shares_tree {
@@ -37,7 +58,7 @@ sub registry {
         next unless ref $j eq 'HASH' && length($j->{sessionId} // '') && $j->{pid} && defined $j->{cwd};
         $trusted = 1 if $j->{sessionId} eq $self;
         next unless pid_alive($j->{pid});
-        push @live, { id => $j->{sessionId}, pid => $j->{pid}, cwd => $j->{cwd}, name => $j->{name} // '', via => 'registry',
+        push @live, { id => $j->{sessionId}, pid => $j->{pid}, cwd => native_path($j->{cwd}), name => $j->{name} // '', via => 'registry',
             busy => ($j->{status} // '') eq 'busy' ? 1 : 0, age => int(time - (($j->{updatedAt} // $j->{startedAt} // 0) / 1000)) };
     }
     return (\@live, $trusted ? 1 : 0);
@@ -45,7 +66,7 @@ sub registry {
 
 sub transcript_dir {
     return $ENV{DT_TRANSCRIPT_DIR} if $ENV{DT_TRANSCRIPT_DIR};
-    (my $slug = real(root())) =~ s/[^A-Za-z0-9]/-/g;
+    (my $slug = is_windows() ? win_path(real(root())) : real(root())) =~ s/[^A-Za-z0-9]/-/g;    # Claude Code names it from the Windows path
     return claude_dir() . "/projects/$slug";
 }
 sub transcript_file { transcript_dir() . "/$_[0].jsonl" }
