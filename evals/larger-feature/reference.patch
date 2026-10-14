@@ -1,0 +1,140 @@
+diff --git a/cli.py b/cli.py
+index d089ead..0c5b368 100644
+--- a/cli.py
++++ b/cli.py
+@@ -4,6 +4,7 @@ import json
+ import os
+ import sys
+ 
++import csvio
+ import inventory
+ 
+ 
+@@ -28,6 +29,11 @@ def main(argv=None):
+         s.add_argument("item")
+         s.add_argument("qty", type=int)
+     sub.add_parser("total")
++    s = sub.add_parser("export")
++    s.add_argument("out")
++    s = sub.add_parser("import")
++    s.add_argument("src")
++    s.add_argument("--replace", action="store_true")
+     args = p.parse_args(argv)
+     stock = load(args.file)
+     if args.cmd == "add":
+@@ -41,6 +47,19 @@ def main(argv=None):
+     elif args.cmd == "total":
+         print(inventory.total_quantity(stock))
+         return 0
++    elif args.cmd == "export":
++        csvio.write_file(args.out, stock)
++        return 0
++    elif args.cmd == "import":
++        try:
++            pairs = csvio.read_file(args.src)
++        except ValueError as e:
++            print(e, file=sys.stderr)
++            return 1
++        if args.replace:
++            stock.clear()
++        for name, qty in pairs:
++            inventory.add_item(stock, name, qty)
+     save(args.file, stock)
+     return 0
+ 
+diff --git a/csvio.py b/csvio.py
+new file mode 100644
+index 0000000..b35708e
+--- /dev/null
++++ b/csvio.py
+@@ -0,0 +1,35 @@
++"""CSV import and export of a stock ledger (name,qty rows under a header)."""
++import csv
++
++
++def export_rows(stock):
++    """Header plus one row per item, alphabetical."""
++    return [["name", "qty"]] + [[n, str(stock[n])] for n in sorted(stock)]
++
++
++def parse_rows(rows):
++    """Rows after the header as (name, qty) pairs; ValueError names every bad line."""
++    pairs, bad = [], []
++    for lineno, row in enumerate(rows, start=2):
++        try:
++            name, qty = row[0].strip(), int(row[1])
++            if not name or qty < 0:
++                raise ValueError
++        except (IndexError, ValueError):
++            bad.append(lineno)
++            continue
++        pairs.append((name, qty))
++    if bad:
++        raise ValueError("bad rows on line(s): " + ", ".join(map(str, bad)))
++    return pairs
++
++
++def read_file(path):
++    with open(path, newline="") as f:
++        rows = list(csv.reader(f))
++    return parse_rows(rows[1:])
++
++
++def write_file(path, stock):
++    with open(path, "w", newline="") as f:
++        csv.writer(f).writerows(export_rows(stock))
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 9c7ab28..f8121af 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -23,6 +23,27 @@ class Cli(unittest.TestCase):
+         self.run_cli("add", "fig", "4")
+         self.assertEqual(self.run_cli("total"), (0, "7\n"))
+ 
++    def test_export_then_import_replace_round_trips(self):
++        self.run_cli("add", "pear", "3")
++        self.run_cli("add", "fig", "4")
++        out = os.path.join(self.dir, "out.csv")
++        self.run_cli("export", out)
++        self.run_cli("add", "kiwi", "9")
++        self.assertEqual(self.run_cli("import", out, "--replace"), (0, ""))
++        self.assertEqual(self.run_cli("total"), (0, "7\n"))
++
++    def test_import_merges_and_a_bad_file_changes_nothing(self):
++        self.run_cli("add", "pear", "3")
++        good = os.path.join(self.dir, "good.csv")
++        open(good, "w").write("name,qty\npear,2\nfig,1\n")
++        self.assertEqual(self.run_cli("import", good), (0, ""))
++        self.assertEqual(self.run_cli("total"), (0, "6\n"))
++        bad = os.path.join(self.dir, "bad.csv")
++        open(bad, "w").write("name,qty\npear,x\n")
++        before = open(self.file).read()
++        self.assertEqual(self.run_cli("import", bad)[0], 1)
++        self.assertEqual(open(self.file).read(), before)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_csvio.py b/tests/test_csvio.py
+new file mode 100644
+index 0000000..a4fdd4e
+--- /dev/null
++++ b/tests/test_csvio.py
+@@ -0,0 +1,17 @@
++import unittest
++
++import csvio
++
++
++class Csvio(unittest.TestCase):
++    def test_export_is_alphabetical_with_header(self):
++        self.assertEqual(csvio.export_rows({"pear": 2, "apple": 5}), [["name", "qty"], ["apple", "5"], ["pear", "2"]])
++
++    def test_bad_rows_are_all_named(self):
++        with self.assertRaises(ValueError) as cm:
++            csvio.parse_rows([["pear", "x"], ["fig", "3"], ["kiwi", "-1"]])
++        self.assertIn("2, 4", str(cm.exception))
++
++
++if __name__ == "__main__":
++    unittest.main()

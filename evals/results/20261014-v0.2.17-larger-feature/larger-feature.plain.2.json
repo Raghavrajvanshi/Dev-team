@@ -1,0 +1,64 @@
+{
+   "arm" : "plain",
+   "case" : "larger-feature",
+   "checks" : [
+      {
+         "id" : "C1",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C2",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C3",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C4",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C5",
+         "pass" : true,
+         "regression" : true
+      },
+      {
+         "id" : "C6",
+         "pass" : true,
+         "regression" : false
+      }
+   ],
+   "claude_turns" : 5,
+   "code_lines" : 49,
+   "cost_usd" : 0.0862,
+   "criteria_pass" : true,
+   "diff_lines" : 89,
+   "duration_s" : 23,
+   "error" : false,
+   "files" : 2,
+   "kind" : "goal",
+   "lane" : "standard",
+   "main_msgs" : 5,
+   "model" : "sonnet",
+   "notes" : [],
+   "prompts" : 1,
+   "run" : 2,
+   "schema" : 1,
+   "spawns" : 0,
+   "stray" : [],
+   "sub_msgs" : 0,
+   "test_lines" : 40,
+   "tokens" : {
+      "cache_read" : 137539,
+      "cache_write" : 11648,
+      "input" : 10,
+      "output" : 2587
+   },
+   "ts" : "2026-10-14T10:34:11Z",
+   "version" : "0.2.17"
+}

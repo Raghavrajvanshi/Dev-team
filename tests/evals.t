@@ -143,8 +143,18 @@ else {
         }
     }
 }
+if ($team && $n == 2) {
+    open my $g, '>>', Cwd::getcwd() . '/.devteam/log.jsonl' or die;
+    print $g encode_json({ event => 'main_stop', agent_type => 'devteam:project-manager', tokens => { 'claude-sonnet-5-5' => { input => 10, output => 100, cache_read => 10000, cache_write => 1000 } } }), "\n";
+    print $g encode_json({ event => 'subagent_stop', agent_type => 'devteam:architect', tokens => { 'claude-opus-5-5' => { input => 0, output => 100, cache_read => 0, cache_write => 0 } } }), "\n";
+    print $g encode_json({ event => 'subagent_stop', agent_type => 'devteam:reviewer', tokens => { 'claude-sonnet-5-5' => { input => 0, output => 0, cache_read => 10000, cache_write => 0 } } }), "\n";
+    close $g;
+}
 print encode_json({ type => 'system', subtype => 'init' }), "\n";
-print encode_json({ type => 'result', subtype => ($ENV{FAKE_SUBTYPE} // 'success'), is_error => JSON::PP::false, num_turns => 4 * $n,
+print encode_json({ type => 'assistant', message => { id => "m-$key-$n-$_", content => [] } }), "\n" for 1 .. ($ENV{FAKE_MAIN} // 0);
+print encode_json({ type => 'assistant', parent_tool_use_id => 'toolu_1', message => { id => "s-$key-$n-$_", content => [] } }), "\n" for 1 .. ($ENV{FAKE_SUB} // 0);
+print encode_json({ type => 'result', subtype => ($ENV{FAKE_SUBTYPE} // 'success'), is_error => ($ENV{FAKE_API_ERROR} ? JSON::PP::true : JSON::PP::false),
+    (length($ENV{FAKE_API_ERROR} // '') ? (api_error => $ENV{FAKE_API_ERROR}, api_error_status => 429) : ()), num_turns => 4 * $n,
     total_cost_usd => $cost + 0, result => 'It counts words in a text.',
     subagent_stats => { spawned => ($team ? ($ENV{FAKE_SPAWNS} // 3) : 0), by_type => {} },
     modelUsage => { 'claude-sonnet-5-5' => { inputTokens => 10 * $n, outputTokens => 100 * $n, cacheReadInputTokens => 1000 * $n, cacheCreationInputTokens => 50 * $n, costUSD => $cost } } }), "\n";
@@ -189,6 +199,8 @@ SKIP: {
     is($r->{cost_usd}, 0.2, 'cost is the session total');
     is($r->{diff_lines}, 9, 'the diff is measured in lines added plus deleted (the reference patch is 9)');
     is_deeply($r->{stray}, [], 'no stray files');
+    is($r->{code_lines}, 2, 'the diff is split: the one-line fix is 2 lines of code (one out, one in)');
+    is($r->{test_lines}, 7, 'and 7 lines of tests');
     is($r->{tokens}{output}, 100, 'tokens come from the result event');
     is($r->{version}, jf("$PLUGIN/.claude-plugin/plugin.json")->{version}, 'the plugin version is recorded');
     ok(-f "$WORK/o1/summary.json", 'a summary is written');
@@ -225,7 +237,7 @@ SKIP: {
     unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
     closedir $dh;
     my $patch = "$REPO/evals/tiny-fix/reference.patch";
-    ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30,0.35', FAKE_SPAWNS => '0' }, 'run', 'tiny-fix', '--arm', 'team',
+    ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30,0.35', FAKE_SPAWNS => '0', FAKE_MAIN => '2', FAKE_SUB => '1' }, 'run', 'tiny-fix', '--arm', 'team',
         '--runs', '1', '--yes', '--budget', '5', '--out', "$WORK/o4", '--work', "$WORK/w4");
     is($rc, 0, 'a team-arm run completes');
     my @calls = map { decode_json($_) } split /\n/, slurp("$fake_dir/calls.jsonl");
@@ -245,6 +257,9 @@ SKIP: {
     is($r->{cost_usd}, 0.35, 'cost is the final cumulative total, not the sum of the turns');
     is($r->{spawns}, 0, 'spawns come from the result event');
     is($r->{prompts}, 3, 'prompts are counted');
+    is($r->{main_msgs}, 6, 'main-thread API messages are counted across the turns (2 x 3)');
+    is($r->{sub_msgs}, 3, 'and subagent messages apart from them');
+    is($r->{pm_share}, 0.5, "the PM's share of the weighted ledger tokens (3510 of 7010 units; opus counts 5x)");
     ok($r->{criteria_pass}, 'criteria pass');
     # the harness did the engagement a person's /devteam:start would have done
     my $repo = "$WORK/w4/tiny-fix.team.1/repo";
@@ -274,7 +289,7 @@ SKIP: {
     $r = jf("$WORK/o6/tiny-fix.team.1.json");
     my $s6 = jf("$WORK/o6/summary.json");
     ok($r->{criteria_pass}, 'the code passes the criteria');
-    is($r->{prompts}, 5, 'the scripted answers are followed by at most two "Continue." turns');
+    is($r->{prompts}, 5, 'the scripted answers are followed by at most two "go with your recommendation" turns');
     is($r->{outcome}, 'none', 'but the goal has no outcome');
     is($s6->{cases}{"tiny-fix"}{team}{passed}, 0, "so the run is not a pass");
 
@@ -290,6 +305,55 @@ SKIP: {
     my @done = glob("$WORK/o7/tiny-fix.plain.*.json");
     cmp_ok(scalar @done, '<', 5, 'not every run was started');
     is(jf("$WORK/o7/summary.json")->{partial}, JSON::PP::true, 'the summary is marked partial');
+}
+
+# --- the lane override ------------------------------------------------------------------------------------------
+SKIP: {
+    skip 'python3 not installed', 4 unless $have_python;
+    unlink "$fake_dir/calls.jsonl";
+    opendir my $dh, $fake_dir or die;
+    unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
+    closedir $dh;
+    my $patch = "$REPO/evals/tiny-fix/reference.patch";
+    ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30,0.35' }, 'run', 'tiny-fix', '--arm', 'team', '--lane', 'standard',
+        '--runs', '1', '--yes', '--budget', '5', '--out', "$WORK/ol", '--work', "$WORK/wl");
+    my @calls = map { decode_json($_) } split /\n/, slurp("$fake_dir/calls.jsonl");
+    like($calls[0]{prompt}, qr/Standard lane\.$/, '--lane changes the lane named in the first message');
+    like($calls[1]{prompt}, qr/the standard lane; no git grants/, 'and in the confirmation');
+    is(jf("$WORK/ol/tiny-fix.team.1.json")->{lane}, 'standard', 'the result records the lane that ran');
+    ($rc, $out) = evals({ %F }, 'run', 'tiny-fix', '--lane', 'huge', '--yes');
+    isnt($rc, 0, 'an unknown lane is refused');
+}
+
+# --- a setup failure is not a result --------------------------------------------------------------------------------
+SKIP: {
+    skip 'python3 not installed', 4 unless $have_python;
+    unlink "$fake_dir/calls.jsonl";
+    my $broken = "$WORK/broken-plugin";
+    system("cp -R $PLUGIN $broken") == 0 or die;
+    spit("$broken/bin/dt", "#!/bin/sh\nexit 2\n");
+    chmod 0755, "$broken/bin/dt";
+    ($rc, $out) = evals({ %F, EVALS_PLUGIN => $broken }, 'run', 'tiny-fix', '--arm', 'team', '--runs', '1', '--yes', '--budget', '5',
+        '--out', "$WORK/oi", '--work', "$WORK/wi");
+    like($out, qr/INVALID/, 'a failing setup step is reported as INVALID');
+    ok(!-e "$fake_dir/calls.jsonl", 'and no session was started');
+    ok(jf("$WORK/oi/tiny-fix.team.1.json")->{invalid}, 'the result file says why');
+    is(jf("$WORK/oi/summary.json")->{invalid}, 1, 'and the summary sets it aside instead of counting a failure');
+}
+
+# --- an API refusal (usage limit) is not a result ------------------------------------------------------------------
+SKIP: {
+    skip 'python3 not installed', 4 unless $have_python;
+    for my $arm (qw(plain team)) {
+        unlink "$fake_dir/calls.jsonl";
+        opendir my $dh, $fake_dir or die;
+        unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
+        closedir $dh;
+        ($rc, $out) = evals({ %F, FAKE_API_ERROR => 'usage_limit_reached', FAKE_COSTS => '0' }, 'run', 'tiny-fix', '--arm', $arm, '--runs', '1', '--yes',
+            '--budget', '5', '--out', "$WORK/oa-$arm", '--work', "$WORK/wa-$arm");
+        like($out, qr/INVALID .*usage_limit_reached/, "$arm arm: a refused session is reported as INVALID");
+        is(jf("$WORK/oa-$arm/summary.json")->{invalid}, 1, "$arm arm: and set aside, not scored as a failed run");
+    }
 }
 
 # --- the inert case --------------------------------------------------------------------------------------------
@@ -367,11 +431,29 @@ like($out, qr/\| standard-feature \| standard \| 8\/3 \| 6\/3 \|/, 'an unclosed 
 # the slop yardstick: diff size against the reference patch and stray files
 my $slop = "$WORK/slop";
 mkdir $slop;
-spit("$slop/slop-fixture.team.1.json", encode_json(result(case => 'slop-fixture', run => 1, diff_lines => 14, stray => ['stats.py'])));
+spit("$slop/slop-fixture.team.1.json", encode_json(result(case => 'slop-fixture', run => 1, diff_lines => 20, stray => ['stats.py'])));
 spit("$slop/slop-fixture.plain.1.json", encode_json(result(case => 'slop-fixture', arm => 'plain', run => 1, diff_lines => 8, outcome => undef, cost_usd => 0.4)));
 $out = `perl $EVALS report $slop 2>&1`;
-like($out, qr/diff: OVER/, 'a diff of 14 lines against a 7-line reference is over 1.3x');
+like($out, qr/diff: OVER/, 'a diff of 20 lines against a 13-line reference is over 1.3x');
 like($out, qr/stray: FOUND/, 'a new file outside the reference footprint is reported');
+
+# one case in two lanes, from two directories, is two rows of one table
+my $syn2 = "$WORK/syn2";
+mkdir $syn2;
+spit("$syn2/standard-feature.team.1.json", encode_json(result(run => 1, lane => 'tiny', cost_usd => 0.4)));
+spit("$syn2/standard-feature.plain.1.json", encode_json(result(arm => 'plain', run => 1, lane => 'tiny', cost_usd => 0.2, outcome => undef)));
+$out = `perl $EVALS report $syn $syn2 2>&1`;
+like($out, qr/\| standard-feature \[standard\] \| standard \|/, 'the standard-lane row is keyed with its lane');
+like($out, qr/\| standard-feature \[tiny\] \| tiny \| 1\/1 \| 1\/1 \| \$0\.40 \| \$0\.20 \| 2\.00x/, 'and the tiny-lane row is its own');
+$out = `perl $EVALS report --compare $syn $syn2 2>&1`;
+like($out, qr/change from v9\.9\.9/, 'two directories can be compared');
+
+# the diff split and the PM share reach the table
+spit("$slop/slop-fixture.team.2.json", encode_json(result(case => 'slop-fixture', run => 2, diff_lines => 14, code_lines => 6, test_lines => 8, pm_share => 0.6, main_msgs => 20)));
+$out = `perl $EVALS report $slop 2>&1`;
+like($out, qr/\| slop-fixture \| 3 \| 20 \(-\) \| 60% \|/, 'the PM turns and the PM share are shown');
+$out = `perl $EVALS report $WORK/no-such-dir 2>&1`;
+like($out, qr/not a results directory/, 'a path that is not a results directory is named');
 
 # --write keeps a marked block and nothing else
 my $doc = "$WORK/EVALS.md";

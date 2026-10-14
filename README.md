@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.2.** Unit and CLI tests pass on macOS, Linux and Windows with Git for Windows (1192 tests, run by CI; the eval harness's own file is skipped on Windows), and the plugin installs cleanly from this repo. The whole flow (intake, research, design, build, review, close) has run end to end, headlessly, in scratch repositories over several live passes; it has not yet been used interactively with your prompts and choices, and not on Windows under Claude Code. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.2.** Unit and CLI tests pass on macOS, Linux and Windows with Git for Windows (1216 tests, run by CI; the eval harness's own file is skipped on Windows), and the plugin installs cleanly from this repo. The whole flow (intake, research, design, build, review, close) has run end to end, headlessly, in scratch repositories over several live passes; it has not yet been used interactively with your prompts and choices, and not on Windows under Claude Code. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -201,7 +201,7 @@ Two sessions editing the same working tree can overwrite each other, and the tea
 
 ## Cost
 
-`claude plugin details devteam` reports the plugin's footprint: about **930 tokens added to every session** (v0.2.8; each agent adds its one-line description, about 30 to 40); hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.8k, `orchestrate` about 3.5k, a Security Engineer spawn about 1.1k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. Savings versus a plain session are not claimed until you measure them; the usage ledger (`/devteam:status`) records spawns and tokens by model.
+`claude plugin details devteam` reports the plugin's footprint: about **930 tokens added to every session** (v0.2.8; each agent adds its one-line description, about 30 to 40); hooks cost no model tokens. Skills and agents cost tokens only when they run (for example `goal` about 1.8k, `orchestrate` about 3.5k, a Security Engineer spawn about 1.1k). Gate results are cached by exact code state so an identical tree is never tested twice, and hooks take about 2–4 ms when the team is not engaged. **Measured (v0.2.17, [docs/EVALS.md](docs/EVALS.md)):** on small, clear goals (a one-line fix up to a 92-line feature) a plain Claude Code session was 2.4x to 9.9x cheaper than the team and finished in a fraction of the time; both passed every check. The team's code was the same size as the plain session's (its extra lines were tests); the cost is the PM's own turns and the agents it starts. The design's targets (1.3x tiny, 2.5x standard) are not met, so no saving is claimed. What the team adds is what the criteria do not measure: a goal confirmed before work starts, criteria verified by script, a tamper-proof close (caught 5 of 5 in the eval) and an independent review. On a large codebase the ratio is untested. The usage ledger (`/devteam:status`) records spawns and tokens by model.
 
 ## Troubleshooting
 
@@ -258,7 +258,7 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 1192 tests
+prove tests/                                        # 1216 tests
 scripts/evals check                                 # the eval cases can fail and can pass (offline); see docs/EVALS.md
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin

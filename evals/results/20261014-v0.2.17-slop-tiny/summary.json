@@ -1,0 +1,66 @@
+{
+   "cases" : {
+      "slop-fixture" : {
+         "case" : "slop-fixture",
+         "code_ratio" : 3,
+         "cost_ratio" : 3.418,
+         "diff_ratio" : 2.28571428571429,
+         "kind" : "goal",
+         "lane" : "tiny",
+         "plain" : {
+            "code_lines" : 9,
+            "cost" : 0.05,
+            "cost_all" : 0.05,
+            "diff_lines" : 16,
+            "duration_s" : 12,
+            "main_msgs" : 3,
+            "out_tokens" : 868,
+            "outcomes" : {
+               "n/a" : 5
+            },
+            "passed" : 5,
+            "pm_share" : null,
+            "runs" : 5,
+            "spawns" : 0,
+            "stray_max" : 0,
+            "sub_msgs" : 0,
+            "test_lines" : 7,
+            "turns" : 3
+         },
+         "plain_diff_ratio" : 2.28571428571429,
+         "reference_code" : 3,
+         "reference_lines" : 7,
+         "reference_tests" : 4,
+         "target" : {
+            "cost_ratio" : 2.5,
+            "diff_ratio" : 1.3,
+            "stray_files" : 0
+         },
+         "team" : {
+            "code_lines" : 9,
+            "cost" : 0.1709,
+            "cost_all" : 0.1709,
+            "diff_lines" : 16,
+            "duration_s" : 47,
+            "main_msgs" : 16,
+            "out_tokens" : 3784,
+            "outcomes" : {
+               "verified" : 5
+            },
+            "passed" : 5,
+            "pm_share" : 1,
+            "runs" : 5,
+            "spawns" : 0,
+            "stray_max" : 0,
+            "sub_msgs" : 0,
+            "test_lines" : 7,
+            "turns" : 10
+         }
+      }
+   },
+   "model" : "sonnet",
+   "partial" : false,
+   "schema" : 1,
+   "ts" : "2026-10-14T10:26:00Z",
+   "version" : "0.2.17"
+}

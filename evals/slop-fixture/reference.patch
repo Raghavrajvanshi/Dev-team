@@ -1,14 +1,21 @@
 diff --git a/sales.py b/sales.py
-index cd68c2a..18448e7 100644
+index cd68c2a..5186336 100644
 --- a/sales.py
 +++ b/sales.py
-@@ -5,6 +5,7 @@ from money import fmt_money
+@@ -3,8 +3,13 @@ from money import fmt_money
+ 
+ 
  def summarise(orders):
-     """Plain-text summary: order count and revenue. Each order is a dict with its price in 'cents'."""
+-    """Plain-text summary: order count and revenue. Each order is a dict with its price in 'cents'."""
++    """Plain-text summary: order count, revenue and average order. Each order is a dict with its price in 'cents'."""
      revenue = sum(o["cents"] for o in orders)
 -    lines = ["Orders: %d" % len(orders), "Revenue: %s" % fmt_money(revenue)]
 +    average = revenue // len(orders) if orders else 0
-+    lines = ["Orders: %d" % len(orders), "Revenue: %s" % fmt_money(revenue), "Average order: %s" % fmt_money(average)]
++    lines = [
++        "Orders: %d" % len(orders),
++        "Revenue: %s" % fmt_money(revenue),
++        "Average order: %s" % fmt_money(average),
++    ]
      # TODO: show refunds separately once the order feed carries them
      return "\n".join(lines)
 diff --git a/tests/test_sales.py b/tests/test_sales.py

@@ -1,0 +1,47 @@
+{
+  "name": "larger-feature",
+  "kind": "goal",
+  "lane": "standard",
+  "about": "A bigger feature on the same stock project: CSV export and a validating import across a new module, the CLI and tests. Shows whether the team's fixed overhead shrinks against a larger plain-session cost.",
+  "goal": "Add CSV support to the stock CLI. `python3 cli.py export OUT.csv` writes a header row `name,qty` and one row per item, alphabetical by name. `python3 cli.py import SRC.csv` adds each row's quantity to the stock (creating items that are new); with `--replace` the stock is first emptied so it ends up exactly as the file says. A row whose quantity is not a whole number or is negative, or that has no name, is invalid: the import then changes nothing, prints to stderr the line numbers of every invalid row (the header is line 1), and exits 1. Cover the new behaviour with tests.",
+  "gate": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "WHEN export runs THEN the file has the header and one row per item, alphabetical",
+      "check": "f=$(mktemp) && rm -f \"$f\" && c=$(mktemp) && rm -f \"$c\" && python3 cli.py --file \"$f\" add pear 2 && python3 cli.py --file \"$f\" add apple 5 && python3 cli.py --file \"$f\" export \"$c\" && test \"$(tr -d '\\r' < \"$c\" | tr '\\n' ' ')\" = \"name,qty apple,5 pear,2 \""
+    },
+    {
+      "id": "C2",
+      "text": "WHEN import runs THEN each row's quantity is added to the stock, creating new items",
+      "check": "f=$(mktemp) && rm -f \"$f\" && c=$(mktemp) && rm -f \"$c\" && printf 'name,qty\\npear,2\\nfig,1\\n' > \"$c\" && python3 cli.py --file \"$f\" add pear 3 && python3 cli.py --file \"$f\" import \"$c\" && test \"$(python3 cli.py --file \"$f\" total)\" = \"6\""
+    },
+    {
+      "id": "C3",
+      "text": "WHEN import runs with --replace THEN the stock ends up exactly as the file says",
+      "check": "f=$(mktemp) && rm -f \"$f\" && c=$(mktemp) && rm -f \"$c\" && printf 'name,qty\\nfig,1\\n' > \"$c\" && python3 cli.py --file \"$f\" add pear 3 && python3 cli.py --file \"$f\" import \"$c\" --replace && test \"$(python3 cli.py --file \"$f\" total)\" = \"1\""
+    },
+    {
+      "id": "C4",
+      "text": "WHEN a row is invalid THEN import changes nothing, names every bad line on stderr and exits 1",
+      "check": "f=$(mktemp) && rm -f \"$f\" && c=$(mktemp) && rm -f \"$c\" && printf 'name,qty\\npear,x\\nfig,2\\nkiwi,-1\\n' > \"$c\" && python3 cli.py --file \"$f\" add pear 3 && before=$(cat \"$f\") && err=$(python3 cli.py --file \"$f\" import \"$c\" 2>&1 >/dev/null); rc=$?; test \"$rc\" = 1 && echo \"$err\" | grep -q 2 && echo \"$err\" | grep -q 4 && test \"$before\" = \"$(cat \"$f\")\""
+    },
+    {
+      "id": "C5",
+      "text": "WHEN the test suite runs THEN it passes",
+      "check": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+      "regression": true
+    },
+    {
+      "id": "C6",
+      "text": "WHEN the feature is done THEN tests cover import and export",
+      "check": "grep -rqi 'import' tests/test_cli.py tests/test_csv*.py 2>/dev/null && grep -rqi 'export' tests/"
+    }
+  ],
+  "allowed_new": [
+    "tests/*.py"
+  ],
+  "target": {
+    "cost_ratio": 2.5
+  }
+}

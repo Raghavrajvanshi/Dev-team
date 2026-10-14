@@ -1,0 +1,56 @@
+{
+   "arm" : "plain",
+   "case" : "tiny-fix",
+   "checks" : [
+      {
+         "id" : "C1",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C2",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C3",
+         "pass" : true,
+         "regression" : true
+      },
+      {
+         "id" : "C4",
+         "pass" : true,
+         "regression" : false
+      }
+   ],
+   "claude_turns" : 5,
+   "code_lines" : 2,
+   "cost_usd" : 0.0568,
+   "criteria_pass" : true,
+   "diff_lines" : 10,
+   "duration_s" : 16,
+   "error" : false,
+   "files" : 3,
+   "kind" : "goal",
+   "lane" : "tiny",
+   "main_msgs" : 4,
+   "model" : "sonnet",
+   "notes" : [],
+   "prompts" : 1,
+   "run" : 3,
+   "schema" : 1,
+   "spawns" : 0,
+   "stray" : [
+      "ordcount.py"
+   ],
+   "sub_msgs" : 0,
+   "test_lines" : 8,
+   "tokens" : {
+      "cache_read" : 103188,
+      "cache_write" : 9106,
+      "input" : 8,
+      "output" : 1008
+   },
+   "ts" : "2026-10-14T10:36:55Z",
+   "version" : "0.2.17"
+}

@@ -64,6 +64,17 @@ if [ "$sha" = "$(git rev-parse HEAD)" ]; then
   verification="$tests tests passing; \`claude plugin validate --strict\` clean for the marketplace, plugin, skills and agents."
 fi
 
+# Evals cost real money, so a release does not run them; it says how stale they are (see docs/EVALS.md).
+evalnote=
+lasteval=$(ls -d evals/results/*-v* 2>/dev/null | sed -n 's/.*-v\([0-9][0-9.]*\).*/\1/p' | sort -V | tail -1)
+if [ -n "$lasteval" ]; then
+  if [ "$lasteval" = "$version" ]; then
+    evalnote="Evals recorded for this version (\`docs/EVALS.md\`)."
+  else
+    evalnote="Evals last recorded on v$lasteval, not re-run for this version (\`scripts/evals run\`, then \`scripts/evals report --compare\`)."
+  fi
+fi
+
 slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 prev=$( { git tag --list 'v*'; echo "$tag"; } | sort -V | awk -v t="$tag" '$0 == t { print p; exit } { p = $0 }')
 if [ -n "$prev" ]; then
@@ -77,6 +88,7 @@ trap 'rm -f "$body"' EXIT
 {
   printf '%s\n' "$notes"
   printf '\n### Verification\n- Commit: `%s`\n- %s\n' "$short" "$verification"
+  if [ -n "$evalnote" ]; then printf -- '- %s\n' "$evalnote"; fi
   printf '\n### Install or update\n```bash\n'
   printf 'claude plugin marketplace add Raghavrajvanshi/Dev-team   # first time only\n'
   printf 'claude plugin install devteam@devteam-marketplace        # first time only\n'

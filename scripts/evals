@@ -3,8 +3,9 @@
 #
 #   scripts/evals list
 #   scripts/evals check [case ...]                       offline: every criterion fails on the fixture and passes with the reference patch
-#   scripts/evals run <case|all> [--arm team|plain|both] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes
-#   scripts/evals report [DIR ...] [--write docs/EVALS.md]
+#   scripts/evals run <case|all> [--arm team|plain|both] [--lane tiny|standard] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes
+#   scripts/evals report [DIR ...] [--write docs/EVALS.md]       (several DIRs are merged into one table)
+#   scripts/evals report --compare OLD_DIR NEW_DIR
 #
 # `run` starts real `claude -p` sessions on your account and spends real money, so it refuses without --yes.
 # Each run gets a scratch git repository built from evals/<case>/fixture; the team arm loads the working-tree plugin
@@ -30,6 +31,7 @@ my $MAX_TURNS      = 5;       # scripted answers, then at most "Continue." until
 my $TURN_TIMEOUT   = $ENV{EVALS_TURN_TIMEOUT} // 1500;
 my $CHECK_TIMEOUT  = 180;
 my $TURN_BUDGET    = 8;       # USD ceiling handed to one `claude -p` call
+my %LANE_TARGET    = (tiny => 1.3, standard => 2.5);    # cost ratio, team over plain (design section 4, rule 11)
 
 my %CMD = (list => \&c_list, check => \&c_check, run => \&c_run, report => \&c_report);
 my ($cmd, @args) = @ARGV;
@@ -38,7 +40,7 @@ eval { $CMD{$cmd}->(@args); 1 } or do { print STDERR $@; exit 1 };
 exit 0;
 
 sub usage {
-    print STDERR "usage: scripts/evals list | check [case...] | run <case|all> [--arm team|plain|both] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes | report [DIR...] [--write FILE]\n";
+    print STDERR "usage: scripts/evals list | check [case...] | run <case|all> [--arm team|plain|both] [--lane tiny|standard] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes | report [DIR...] [--write FILE] | report --compare OLD NEW\n";
     exit 2;
 }
 sub die_ { die "evals: @_\n" }
@@ -153,15 +155,22 @@ sub reference_files {
     close $h;
     return \%f;
 }
-sub patch_lines {
+sub is_test_path { $_[0] =~ m{(?:^|/)(?:tests?|spec|__tests__)/|(?:^|/)test_[^/]*\.\w+$|_test\.\w+$|\.(?:test|spec)\.\w+$} ? 1 : 0 }
+# Lines added plus deleted in a patch, as (total, code, tests).
+sub patch_split {
     my ($file) = @_;
-    my $n = 0;
-    open my $h, '<', $file or return 0;
+    my ($code, $tests, $cur) = (0, 0, '');
+    open my $h, '<', $file or return (0, 0, 0);
     local $_;
-    while (<$h>) { $n++ if /^[+-](?![+-]{2} )/ }
+    while (<$h>) {
+        if (m{^diff --git a/(\S+) b/}) { $cur = $1; next }
+        next unless /^[+-](?![+-]{2} )/;
+        if (is_test_path($cur)) { $tests++ } else { $code++ }
+    }
     close $h;
-    return $n;
+    return ($code + $tests, $code, $tests);
 }
+sub patch_lines { (patch_split($_[0]))[0] }
 sub glob_re {
     my ($g) = @_;
     my $re = quotemeta $g;
@@ -175,17 +184,19 @@ sub measure_diff {
     $base ||= 'HEAD';
     sh_run($repo, 'git add -A', 60);
     my (undef, $stat) = sh_run($repo, "git diff --cached --numstat $base", 60);
-    my ($lines, @files) = (0);
-    for (split /\n/, $stat) {
-        my ($a, $d, $f) = split /\t/, $_, 3;
+    my ($lines, $code, $tests, @files) = (0, 0, 0);
+    for my $row (split /\n/, $stat) {
+        my ($a, $d, $f) = split /\t/, $row, 3;
         next unless defined $f;
-        $lines += ($a =~ /^\d+$/ ? $a : 0) + ($d =~ /^\d+$/ ? $d : 0);
+        my $n = ($a =~ /^\d+$/ ? $a : 0) + ($d =~ /^\d+$/ ? $d : 0);
+        $lines += $n;
+        if (is_test_path($f)) { $tests += $n } else { $code += $n }
         push @files, $f;
     }
     my $ref = reference_files($case);
     my @allowed = map { glob_re($_) } @{ $case->{allowed_new} // [] };
     my @stray = grep { my $f = $_; !$ref->{$f} && !grep { $f =~ $_ } @allowed } @files;
-    return { diff_lines => $lines, files => scalar(@files), stray => [ sort @stray ] };
+    return { diff_lines => $lines, code_lines => $code, test_lines => $tests, files => scalar(@files), stray => [ sort @stray ] };
 }
 
 # --------------------------------------------------------------------------- list / check
@@ -277,12 +288,47 @@ sub last_result {
         next unless $l =~ /^\{/;
         my $e = eval { JSON::PP->new->decode($l) } or next;
         next unless ref $e eq 'HASH' && ($e->{type} // '') eq 'result';
-        %r = (found => 1, subtype => $e->{subtype}, is_error => $e->{is_error} ? 1 : 0, turns => $e->{num_turns},
+        %r = (found => 1, subtype => $e->{subtype}, is_error => $e->{is_error} ? 1 : 0, api_error => $e->{api_error}, turns => $e->{num_turns},
             cost => $e->{total_cost_usd}, text => $e->{result}, spawned => ($e->{subagent_stats} // {})->{spawned},
             by_type => ($e->{subagent_stats} // {})->{by_type}, models => $e->{modelUsage} // {});
     }
     close $h;
     return \%r;
+}
+# Main-thread and subagent API messages (distinct message ids) across all turn files of one run.
+sub message_counts {
+    my ($work) = @_;
+    my (%seen, $main, $sub);
+    $main = $sub = 0;
+    for my $f (sort glob("$work/turn*.jsonl")) {
+        open my $h, '<:raw', $f or next;
+        while (my $l = <$h>) {
+            next unless $l =~ /"type":\s*"assistant"/;
+            my $e = eval { JSON::PP->new->decode($l) } or next;
+            my $id = ($e->{message} // {})->{id} // next;
+            next if $seen{$id}++;
+            if ($e->{parent_tool_use_id}) { $sub++ } else { $main++ }
+        }
+        close $h;
+    }
+    return ($main, $sub);
+}
+# Weighted token units by role from the team's ledger: input 1, output 5, cache read 0.1, cache write 2 (list-price
+# ratios, the 1-hour cache write), times the price family from the project's own table (opus 5, sonnet 1, haiku 0.25).
+sub ledger_weights {
+    my ($repo) = @_;
+    my %pr = (opus => 5, sonnet => 1, haiku => 0.25);
+    my ($main, $sub) = (0, 0);
+    for my $e (log_events($repo)) {
+        next unless ref $e->{tokens} eq 'HASH';
+        for my $m (keys %{ $e->{tokens} }) {
+            my ($fam) = grep { $m =~ /$_/ } keys %pr;
+            my $t = $e->{tokens}{$m};
+            my $u = ($pr{ $fam // 'sonnet' }) * (($t->{input} // 0) + 5 * ($t->{output} // 0) + 0.1 * ($t->{cache_read} // 0) + 2 * ($t->{cache_write} // 0));
+            if (($e->{event} // '') eq 'main_stop') { $main += $u } elsif (($e->{event} // '') eq 'subagent_stop') { $sub += $u }
+        }
+    }
+    return ($main, $sub);
 }
 sub tokens_of {
     my ($models) = @_;
@@ -367,20 +413,34 @@ sub do_run {
 
     if ($arm eq 'team') {
         my $sid = uuid();
-        for my $step (['init'], ['engage', $sid], ['models', 'choose'], ['trace', 'on'], ['gate', 'set', "test=$case->{gate}"], ['gitignore']) {
+        # The scratch repository is the harness's alone: whatever transcripts sit at its path are its own history.
+        for my $step (['init'], ['engage', $sid, '--accept-others'], ['models', 'choose'], ['trace', 'on'], ['gate', 'set', "test=$case->{gate}"], ['gitignore']) {
             my ($rc, $out) = dt($repo, $env, @$step);
-            push @{ $r{notes} }, "dt @$step exit $rc" if $rc && $step->[0] ne 'gitignore';
+            next unless $rc && $step->[0] ne 'gitignore';
+            push @{ $r{notes} }, "dt @$step exit $rc";
+            $r{invalid} = "setup step 'dt $step->[0]' failed (exit $rc): " . substr($out, 0, 200) unless $r{invalid};
+        }
+        if ($r{invalid}) {
+            # not the team's result: nothing was run, nothing is scored
+            @r{qw(cost_usd duration_s claude_turns prompts diff_lines code_lines test_lines files)} = (0) x 8;
+            @r{qw(checks stray)} = ([], []);
+            @r{qw(criteria_pass error)} = (JSON::PP::false, JSON::PP::false);
+            $r{spawns} = 0;
+            $r{tokens} = tokens_of({});
+            $r{work} = $work;
+            return \%r;
         }
         for my $f (qw(profile.md standards.md)) { spit("$repo/.devteam/$f", slurp("$case->{dir}/$f")) }
         my @prompts = team_prompts($case);
         my $tampered = 0;
         for my $i (1 .. $MAX_TURNS) {
             last if $remaining->() <= 0.2;
-            my $p = $prompts[$i - 1] // 'Continue.';
+            my $p = $prompts[$i - 1] // 'Go with your recommendation on whatever is still open, and close the goal.';
             $res = claude_turn(arm => 'team', cwd => $repo, env => with_plugin_bin($env), prompt => $p, model => $o->{model},
                 budget => sprintf('%.2f', $remaining->()), sid => $sid, first => $i == 1, out => "$work/turn$i.jsonl");
             $turns_done++;
             $cost = $res->{cost} if defined $res->{cost};    # cumulative across resumed turns
+            if ($res->{api_error}) { $r{invalid} = "the API refused a turn ($res->{api_error}); not a result for either arm"; last }
             push @{ $r{notes} }, "turn $i: " . ($res->{found} ? "$res->{subtype}" : 'no result event') . ($res->{timed_out} ? ', timed out' : '') unless $res->{found} && ($res->{subtype} // '') eq 'success';
             last if $case->{kind} eq 'inert';
             my $st = state_of($repo);
@@ -403,6 +463,8 @@ sub do_run {
         $r{outcome} = ref $st->{outcome} eq 'HASH' ? ($st->{outcome}{result} // 'none') : 'none';
         $r{goal_started} = length($st->{goal} // '') ? JSON::PP::true : JSON::PP::false;
         $r{spawns} = defined $res->{spawned} ? $res->{spawned} + 0 : scalar grep { ($_->{event} // '') eq 'subagent_stop' } @ev;
+        my ($pm_u, $sub_u) = ledger_weights($repo);
+        $r{pm_share} = $pm_u + $sub_u ? sprintf('%.2f', $pm_u / ($pm_u + $sub_u)) + 0 : undef;
         $r{tamper_events} = scalar grep { ($_->{event} // '') eq 'tamper' } @ev;
         $r{blocked_reason} = $st->{blocked_reason} if ($st->{status} // '') eq 'BLOCKED';
         if ($case->{kind} eq 'tamper') {
@@ -417,6 +479,7 @@ sub do_run {
             budget => sprintf('%.2f', $remaining->()), out => "$work/turn1.jsonl");
         $turns_done = 1;
         $cost = $res->{cost} // 0;
+        $r{invalid} = "the API refused the session ($res->{api_error}); not a result for either arm" if $res->{api_error};
         push @{ $r{notes} }, 'plain: ' . ($res->{found} ? $res->{subtype} : 'no result event') unless $res->{found} && ($res->{subtype} // '') eq 'success';
         $r{spawns} = defined $res->{spawned} ? $res->{spawned} + 0 : 0;
     }
@@ -426,8 +489,9 @@ sub do_run {
     $r{prompts}     = $turns_done;
     $r{tokens}      = tokens_of($res->{models});
     $r{error}       = $res->{is_error} ? JSON::PP::true : JSON::PP::false;
+    ($r{main_msgs}, $r{sub_msgs}) = message_counts($work);
     my $m = measure_diff($case, $repo, $base);
-    @r{qw(diff_lines files stray)} = @$m{qw(diff_lines files stray)};
+    @r{qw(diff_lines code_lines test_lines files stray)} = @$m{qw(diff_lines code_lines test_lines files stray)};
     $r{checks} = run_checks($case, $repo);
     my @must = grep { !$_->{pass} } @{ $r{checks} };
     $r{criteria_pass} = !@must && @{ $r{checks} } ? JSON::PP::true : JSON::PP::false;
@@ -461,6 +525,7 @@ sub c_run {
     while (@a) {
         my $x = shift @a;
         if    ($x eq '--arm')    { $o{arm} = shift @a // '' }
+        elsif ($x eq '--lane')   { $o{lane} = shift @a // '' }
         elsif ($x eq '--runs')   { $o{runs} = shift @a // '' }
         elsif ($x eq '--budget') { $o{budget} = shift @a // '' }
         elsif ($x eq '--model')  { $o{model} = shift @a // '' }
@@ -471,10 +536,12 @@ sub c_run {
         else                     { push @names, $x }
     }
     die_('--arm is team, plain or both') unless $o{arm} =~ /^(?:team|plain|both)$/;
+    die_('--lane is tiny or standard') if defined $o{lane} && $o{lane} !~ /^(?:tiny|standard)$/;
     die_('--runs is a whole number from 1 to 20') unless $o{runs} =~ /^\d+$/ && $o{runs} >= 1 && $o{runs} <= 20;
     die_('--budget is a dollar amount') unless $o{budget} =~ /^\d+(?:\.\d+)?$/ && $o{budget} > 0;
     @names = case_names() if !@names || grep { $_ eq 'all' } @names;
     my @cases = map { load_case($_) } @names;
+    if (defined $o{lane}) { $_->{lane} = $o{lane} for grep { $_->{kind} ne 'inert' } @cases }
     my @arms = $o{arm} eq 'both' ? qw(team plain) : ($o{arm});
     my @plan;
     for my $n (1 .. $o{runs}) {
@@ -508,6 +575,7 @@ sub c_run {
         my %pub = %$r;
         delete $pub{work};
         spit($file, $JSON->encode(\%pub));
+        if ($r->{invalid}) { print "INVALID ($r->{invalid})\n"; next }
         printf "%s  \$%.3f  %ds  spawns %s  diff %s  stray %d%s\n", $r->{criteria_pass} || $c->{kind} eq 'inert' ? 'pass' : 'FAIL', $r->{cost_usd}, $r->{duration_s},
             $r->{spawns}, $r->{diff_lines}, scalar @{ $r->{stray} }, $arm eq 'team' && $r->{outcome} ? "  outcome $r->{outcome}" : '';
     }
@@ -537,39 +605,57 @@ sub tamper_ok {
     return $r->{tamper_detected} && ($r->{outcome} // '') ne 'verified' ? 1 : 0;
 }
 sub summarise {
-    my ($dir, $partial) = @_;
-    my @runs = load_runs($dir);
-    my %by;
-    push @{ $by{ $_->{case} }{ $_->{arm} } }, $_ for @runs;
-    my %s = (schema => 1, version => $runs[0]{version} // version(), model => $runs[0]{model}, ts => $runs[0]{ts}, partial => $partial ? JSON::PP::true : JSON::PP::false, cases => {});
+    my ($dirs, $partial) = @_;
+    $dirs = [$dirs] unless ref $dirs;
+    my @all = map { load_runs($_) } @$dirs;
+    my @runs = grep { !$_->{invalid} } @all;    # a run whose setup failed says nothing about the team
+    my $invalid = @all - @runs;
+    my (%by, %lanes);
+    for my $r (@runs) {
+        $by{ $r->{case} }{ $r->{lane} // '' }{ $r->{arm} } = [ @{ $by{ $r->{case} }{ $r->{lane} // '' }{ $r->{arm} } // [] }, $r ];
+        $lanes{ $r->{case} }{ $r->{lane} // '' } = 1;
+    }
+    my %s = (schema => 1, version => $runs[0]{version} // version(), model => $runs[0]{model}, ts => $runs[0]{ts}, partial => $partial ? JSON::PP::true : JSON::PP::false, invalid => $invalid, cases => {});
     for my $name (sort keys %by) {
-        my $c = eval { load_case($name) } // { target => {}, kind => $by{$name}{team}[0]{kind} // $by{$name}{plain}[0]{kind} };
-        my %row = (kind => $c->{kind}, lane => $c->{lane}, target => $c->{target} // {});
-        for my $arm (qw(team plain)) {
-            my @r = @{ $by{$name}{$arm} // [] };
-            next unless @r;
-            my @pass = grep { $c->{kind} eq 'tamper' ? tamper_ok($_) : ok_run($_) } @r;
-            my @costed = $c->{kind} eq 'tamper' ? @r : @pass;    # cost is only compared over runs that did the job
-            my @stray = map { scalar @{ $_->{stray} // [] } } @costed;
-            $row{$arm} = {
-                runs => scalar @r, passed => scalar @pass,
-                cost => median(map { $_->{cost_usd} } @costed), cost_all => median(map { $_->{cost_usd} } @r),
-                turns => median(map { $_->{claude_turns} } @costed), spawns => median(map { $_->{spawns} } @costed),
-                diff_lines => median(map { $_->{diff_lines} } @costed), duration_s => median(map { $_->{duration_s} } @costed),
-                stray_max => (sort { $b <=> $a } @stray, 0)[0],
-                out_tokens => median(map { ($_->{tokens} // {})->{output} } @costed),
-                outcomes => { map { my $o = $_->{outcome} // 'n/a'; ($o => scalar grep { ($_->{outcome} // 'n/a') eq $o } @r) } @r },
-            };
+        my $c = eval { load_case($name) } // { target => {}, kind => 'goal' };
+        for my $lane (sort keys %{ $by{$name} }) {
+            my $key = keys %{ $lanes{$name} } > 1 ? "$name [$lane]" : $name;
+            my $arms = $by{$name}{$lane};
+            my %row = (case => $name, kind => $c->{kind}, lane => $lane, target => { %{ $c->{target} // {} } });
+            delete $row{target}{cost_ratio};    # the cost target belongs to the lane that ran, not to the case's default lane
+            $row{target}{cost_ratio} = $LANE_TARGET{$lane} if $LANE_TARGET{$lane} && $c->{kind} eq 'goal';
+            $row{kind} = ($arms->{team} // $arms->{plain})[0][0]{kind} // $c->{kind};
+            for my $arm (qw(team plain)) {
+                my @r = @{ $arms->{$arm} // [] };
+                next unless @r;
+                my @pass = grep { $row{kind} eq 'tamper' ? tamper_ok($_) : ok_run($_) } @r;
+                my @costed = $row{kind} eq 'tamper' ? @r : @pass;    # cost is only compared over runs that did the job
+                my @stray = map { scalar @{ $_->{stray} // [] } } @costed;
+                $row{$arm} = {
+                    runs => scalar @r, passed => scalar @pass,
+                    cost => median(map { $_->{cost_usd} } @costed), cost_all => median(map { $_->{cost_usd} } @r),
+                    turns => median(map { $_->{claude_turns} } @costed), spawns => median(map { $_->{spawns} } @costed),
+                    diff_lines => median(map { $_->{diff_lines} } @costed), duration_s => median(map { $_->{duration_s} } @costed),
+                    code_lines => median(map { $_->{code_lines} } @costed), test_lines => median(map { $_->{test_lines} } @costed),
+                    main_msgs => median(map { $_->{main_msgs} } @costed), sub_msgs => median(map { $_->{sub_msgs} } @costed),
+                    pm_share => median(map { $_->{pm_share} } @costed),
+                    stray_max => (sort { $b <=> $a } @stray, 0)[0],
+                    stray_runs => scalar(grep { $_ > 0 } @stray),
+                    out_tokens => median(map { ($_->{tokens} // {})->{output} } @costed),
+                    outcomes => { map { my $o = $_->{outcome} // 'n/a'; ($o => scalar grep { ($_->{outcome} // 'n/a') eq $o } @r) } @r },
+                };
+            }
+            my ($t, $p) = @row{qw(team plain)};
+            $row{cost_ratio} = $t->{cost} && $p->{cost} ? $t->{cost} / $p->{cost} : undef;
+            if ($row{kind} ne 'inert' && $row{kind} ne 'tamper') {
+                my ($refn, $refc, $reft) = -f "$EVALS/$name/reference.patch" ? patch_split("$EVALS/$name/reference.patch") : (0, 0, 0);
+                @row{qw(reference_lines reference_code reference_tests)} = ($refn, $refc, $reft);
+                $row{code_ratio} = $refc && defined $t->{code_lines} ? $t->{code_lines} / $refc : undef;
+                $row{diff_ratio} = $refn && $t->{diff_lines} ? $t->{diff_lines} / $refn : undef;
+                $row{plain_diff_ratio} = $refn && $p->{diff_lines} ? $p->{diff_lines} / $refn : undef;
+            }
+            $s{cases}{$key} = \%row;
         }
-        my ($t, $p) = @row{qw(team plain)};
-        $row{cost_ratio} = $t->{cost} && $p->{cost} ? $t->{cost} / $p->{cost} : undef;
-        if ($c->{kind} ne 'inert' && $c->{kind} ne 'tamper') {
-            my $refn = -f "$EVALS/$name/reference.patch" ? patch_lines("$EVALS/$name/reference.patch") : 0;
-            $row{reference_lines} = $refn;
-            $row{diff_ratio} = $refn && $t->{diff_lines} ? $t->{diff_lines} / $refn : undef;
-            $row{plain_diff_ratio} = $refn && $p->{diff_lines} ? $p->{diff_lines} / $refn : undef;
-        }
-        $s{cases}{$name} = \%row;
     }
     return \%s;
 }
@@ -604,46 +690,56 @@ sub ratio { defined $_[0] ? sprintf('%.2fx', $_[0]) : '-' }
 sub render_summary {
     my ($s) = @_;
     my @out;
-    push @out, '| Case | Lane | Runs (team/plain) | Passed (team/plain) | Median cost team | Median cost plain | Cost ratio | Spawns | Diff lines team (plain; reference) | Stray files | Verdict |';
-    push @out, '|---|---|---|---|---|---|---|---|---|---|---|';
+    push @out, '| Case | Lane | Runs team/plain | Passed team/plain | Median cost team | Median cost plain | Cost ratio | Target | Verdict |';
+    push @out, '|---|---|---|---|---|---|---|---|---|';
+    my @shape = ('| Case | Spawns | PM turns team (plain) | PM share of team cost | Diff lines team (plain; reference) | of which code | Runs with a stray file, team (plain) |', '|---|---|---|---|---|---|---|');
     for my $name (sort keys %{ $s->{cases} }) {
         my $c = $s->{cases}{$name};
         my ($t, $p) = ($c->{team} // {}, $c->{plain} // {});
-        push @out, sprintf '| %s | %s | %s/%s | %s/%s | %s | %s | %s | %s | %s | %s | %s |', $name, $c->{lane} // '-',
+        my $tg = $c->{target} // {};
+        push @out, sprintf '| %s | %s | %s/%s | %s/%s | %s | %s | %s | %s | %s |', $name, $c->{lane} // '-',
             $t->{runs} // 0, $p->{runs} // 0, $t->{passed} // 0, $p->{passed} // 0, money($t->{cost}), money($p->{cost}), ratio($c->{cost_ratio}),
-            num($t->{spawns}),
+            (defined $tg->{cost_ratio} ? sprintf('%.1fx', $tg->{cost_ratio}) : '-'), verdict($c) || '-';
+        push @shape, sprintf '| %s | %s | %s (%s) | %s | %s | %s | %s |', $name, num($t->{spawns}), num($t->{main_msgs}), num($p->{main_msgs}),
+            (defined $t->{pm_share} ? sprintf('%d%%', 100 * $t->{pm_share}) : '-'),
             ($c->{reference_lines} ? sprintf('%s (%s; %d)', num($t->{diff_lines}), num($p->{diff_lines}), $c->{reference_lines}) : '-'),
-            ($c->{reference_lines} ? num($t->{stray_max}) : '-'), verdict($c) || '-';
+            ($c->{reference_lines} ? sprintf('%s (%s; %d)', num($t->{code_lines}), num($p->{code_lines}), $c->{reference_code}) : '-'),
+            ($c->{reference_lines} ? sprintf('%s (%s) of %s', num($t->{stray_runs}), num($p->{stray_runs}), num($t->{passed})) : '-');
     }
-    return join "\n", @out;
+    my $note = $s->{invalid} ? "\n\n$s->{invalid} run(s) were set aside because their setup failed or the API refused the session (not a result for either arm)." : '';
+    return join("\n", @out) . "\n\n" . join("\n", @shape) . $note;
 }
 
 sub c_report {
     my @a = @_;
-    my ($write, @dirs);
+    my ($write, @dirs, @cmp);
     while (@a) {
         my $x = shift @a;
-        if ($x eq '--write') { $write = shift @a } else { push @dirs, $x }
+        if    ($x eq '--write')   { $write = shift @a }
+        elsif ($x eq '--compare') { @cmp = splice(@a, 0, 2) }
+        else                      { push @dirs, $x }
+    }
+    if (@cmp) {
+        die_('--compare takes two results directories: OLD NEW') unless @cmp == 2 && defined $cmp[1];
+        my ($old, $new) = map { summarise($_, 0) } @cmp;
+        print "## change from v$old->{version} ($cmp[0]) to v$new->{version} ($cmp[1])\n\n";
+        for my $key (sort keys %{ $new->{cases} }) {
+            my ($o, $n) = ($old->{cases}{$key}, $new->{cases}{$key});
+            next unless $o;
+            printf "- %s: cost ratio %s -> %s%s; diff code lines %s -> %s\n", $key, ratio($o->{cost_ratio}), ratio($n->{cost_ratio}),
+                (defined $o->{cost_ratio} && defined $n->{cost_ratio} && $n->{cost_ratio} > $o->{cost_ratio} * 1.1) ? '  (worse by more than 10%)' : '',
+                num(($o->{team} // {})->{code_lines}), num(($n->{team} // {})->{code_lines});
+        }
+        return;
     }
     @dirs = (latest_dir()) unless @dirs;
     die_('no results yet: run scripts/evals run first') unless defined $dirs[0];
-    my @sum = map { summarise($dirs[$_], 0) } 0 .. $#dirs;
-    for my $i (0 .. $#dirs) {
-        print "## $dirs[$i]  (v$sum[$i]{version}, $sum[$i]{model}, $sum[$i]{ts})\n\n", render_summary($sum[$i]), "\n\n";
-    }
-    if (@dirs == 2) {
-        my ($old, $new) = @sum;
-        print "## change from v$old->{version} to v$new->{version}\n\n";
-        for my $name (sort keys %{ $new->{cases} }) {
-            my ($o, $n) = ($old->{cases}{$name}, $new->{cases}{$name});
-            next unless $o;
-            printf "- %s: cost ratio %s -> %s%s\n", $name, ratio($o->{cost_ratio}), ratio($n->{cost_ratio}),
-                (defined $o->{cost_ratio} && defined $n->{cost_ratio} && $n->{cost_ratio} > $o->{cost_ratio} * 1.1) ? '  (worse by more than 10%)' : '';
-        }
-    }
+    for my $d (@dirs) { die_("not a results directory: $d") unless -d $d }
+    my $s = summarise(\@dirs, 0);
+    print "## @dirs  (v$s->{version}, $s->{model}, $s->{ts})\n\n", render_summary($s), "\n";
     if ($write) {
         my $doc = -f $write ? slurp($write) : '';
-        my $block = "<!-- evals:begin -->\n" . history_and_latest(@dirs) . "\n<!-- evals:end -->";
+        my $block = "<!-- evals:begin -->\n" . history_and_latest($s, \@dirs) . "\n<!-- evals:end -->";
         if ($doc =~ /<!-- evals:begin -->.*<!-- evals:end -->/s) { $doc =~ s/<!-- evals:begin -->.*<!-- evals:end -->/$block/s }
         else { $doc .= "\n$block\n" }
         spit($write, $doc);
@@ -655,17 +751,18 @@ sub latest_dir {
     return $d[-1];
 }
 sub history_and_latest {
-    my (@dirs) = @_;
-    my $s = summarise($dirs[-1], 0);
+    my ($s, $dirs) = @_;
     my @out = ("### Latest run: v$s->{version}, $s->{ts}, model $s->{model}\n", render_summary($s));
+    my %mine = map { abs_path($_) => 1 } @$dirs;
     my @all = sort grep { -d $_ } glob("$EVALS/results/*");
-    if (@all > 1) {
+    if (@all > @$dirs) {
         push @out, "\n### History (cost ratio team / plain, medians)\n";
-        my @cases = sort keys %{ $s->{cases} };
-        push @out, '| Version | Date | ' . join(' | ', @cases) . ' |', '|---|---|' . join('', map { '---|' } @cases);
+        my @cols = sort keys %{ $s->{cases} };
+        push @out, '| Run | Version | ' . join(' | ', @cols) . ' |', '|---|---|' . join('', map { '---|' } @cols);
         for my $d (@all) {
             my $x = summarise($d, 0);
-            push @out, '| v' . $x->{version} . ' | ' . substr($x->{ts} // '', 0, 10) . ' | ' . join(' | ', map { ratio(($x->{cases}{$_} // {})->{cost_ratio}) } @cases) . ' |';
+            my ($label) = $d =~ m{/([^/]+)$};
+            push @out, "| $label | v$x->{version} | " . join(' | ', map { ratio(($x->{cases}{$_} // {})->{cost_ratio}) } @cols) . ' |';
         }
     }
     return join "\n", @out;
