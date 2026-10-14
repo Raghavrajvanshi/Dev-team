@@ -1,0 +1,42 @@
+{
+  "name": "standard-feature",
+  "kind": "goal",
+  "lane": "standard",
+  "about": "A small feature across two modules with tests: the standard lane against a plain session.",
+  "goal": "Add a low-stock command to the stock CLI: `python3 cli.py low-stock --below N` prints, one per line, the names of the items whose quantity is below N, lowest quantity first and alphabetical among equal quantities. It prints nothing when no item is below N, and it must not change the stock file. Put the logic in inventory.py as a function the CLI calls, and cover it with tests.",
+  "gate": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "WHEN items are below N THEN low-stock prints their names, lowest quantity first, ties alphabetical",
+      "check": "f=$(mktemp) && rm -f \"$f\" && python3 cli.py --file \"$f\" add pear 5 && python3 cli.py --file \"$f\" add apple 5 && python3 cli.py --file \"$f\" add fig 1 && python3 cli.py --file \"$f\" add kiwi 9 && test \"$(python3 cli.py --file \"$f\" low-stock --below 6 | tr '\\n' ' ')\" = \"fig apple pear \""
+    },
+    {
+      "id": "C2",
+      "text": "WHEN no item is below N THEN low-stock prints nothing and the stock file is unchanged",
+      "check": "f=$(mktemp) && rm -f \"$f\" && python3 cli.py --file \"$f\" add pear 5 && before=$(cat \"$f\") && out=$(python3 cli.py --file \"$f\" low-stock --below 1) && test -z \"$out\" && test \"$before\" = \"$(cat \"$f\")\""
+    },
+    {
+      "id": "C3",
+      "text": "WHEN the logic is needed THEN a low-stock function lives in inventory.py",
+      "check": "PYTHONPATH=. python3 -c \"import inspect, inventory; assert [n for n, f in inspect.getmembers(inventory, inspect.isfunction) if 'low' in n]\""
+    },
+    {
+      "id": "C4",
+      "text": "WHEN the test suite runs THEN it passes",
+      "check": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+      "regression": true
+    },
+    {
+      "id": "C5",
+      "text": "WHEN the feature is done THEN tests cover low-stock",
+      "check": "grep -rqiE 'low.stock|low_stock' tests/"
+    }
+  ],
+  "target": {
+    "cost_ratio": 2.5
+  },
+  "allowed_new": [
+    "tests/*.py"
+  ]
+}

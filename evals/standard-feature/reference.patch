@@ -1,0 +1,70 @@
+diff --git a/cli.py b/cli.py
+index d089ead..3431f33 100644
+--- a/cli.py
++++ b/cli.py
+@@ -28,6 +28,8 @@ def main(argv=None):
+         s.add_argument("item")
+         s.add_argument("qty", type=int)
+     sub.add_parser("total")
++    s = sub.add_parser("low-stock")
++    s.add_argument("--below", type=int, required=True)
+     args = p.parse_args(argv)
+     stock = load(args.file)
+     if args.cmd == "add":
+@@ -41,6 +43,10 @@ def main(argv=None):
+     elif args.cmd == "total":
+         print(inventory.total_quantity(stock))
+         return 0
++    elif args.cmd == "low-stock":
++        for name in inventory.low_stock(stock, args.below):
++            print(name)
++        return 0
+     save(args.file, stock)
+     return 0
+ 
+diff --git a/inventory.py b/inventory.py
+index 1495bc8..bf9af87 100644
+--- a/inventory.py
++++ b/inventory.py
+@@ -17,3 +17,8 @@ def remove_item(stock, name, qty):
+ def total_quantity(stock):
+     """Units on hand across every item."""
+     return sum(stock.values())
++
++
++def low_stock(stock, below):
++    """Names of items with fewer than `below` units, fewest first, then alphabetical."""
++    return sorted((n for n, q in stock.items() if q < below), key=lambda n: (stock[n], n))
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 9c7ab28..06cb1da 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -23,6 +23,13 @@ class Cli(unittest.TestCase):
+         self.run_cli("add", "fig", "4")
+         self.assertEqual(self.run_cli("total"), (0, "7\n"))
+ 
++    def test_low_stock_lists_names_and_changes_nothing(self):
++        self.run_cli("add", "pear", "5")
++        self.run_cli("add", "fig", "1")
++        before = open(self.file).read()
++        self.assertEqual(self.run_cli("low-stock", "--below", "6"), (0, "fig\npear\n"))
++        self.assertEqual(open(self.file).read(), before)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_inventory.py b/tests/test_inventory.py
+index bbb3f12..1c210df 100644
+--- a/tests/test_inventory.py
++++ b/tests/test_inventory.py
+@@ -18,6 +18,10 @@ class Stock(unittest.TestCase):
+     def test_total(self):
+         self.assertEqual(inventory.total_quantity({"a": 2, "b": 3}), 5)
+ 
++    def test_low_stock_fewest_first_then_alphabetical(self):
++        s = {"pear": 5, "apple": 5, "fig": 1, "kiwi": 9}
++        self.assertEqual(inventory.low_stock(s, 6), ["fig", "apple", "pear"])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

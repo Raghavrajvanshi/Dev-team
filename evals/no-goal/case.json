@@ -1,0 +1,12 @@
+{
+  "name": "no-goal",
+  "kind": "inert",
+  "lane": "none",
+  "about": "An engaged team with no goal and a plain question: nothing may be spawned or started, and the always-on cost of the plugin shows against a plain session.",
+  "goal": "In two sentences, what does this project do?",
+  "gate": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+  "criteria": [],
+  "target": {
+    "spawns": 0
+  }
+}

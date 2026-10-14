@@ -1,0 +1,28 @@
+diff --git a/sales.py b/sales.py
+index cd68c2a..18448e7 100644
+--- a/sales.py
++++ b/sales.py
+@@ -5,6 +5,7 @@ from money import fmt_money
+ def summarise(orders):
+     """Plain-text summary: order count and revenue. Each order is a dict with its price in 'cents'."""
+     revenue = sum(o["cents"] for o in orders)
+-    lines = ["Orders: %d" % len(orders), "Revenue: %s" % fmt_money(revenue)]
++    average = revenue // len(orders) if orders else 0
++    lines = ["Orders: %d" % len(orders), "Revenue: %s" % fmt_money(revenue), "Average order: %s" % fmt_money(average)]
+     # TODO: show refunds separately once the order feed carries them
+     return "\n".join(lines)
+diff --git a/tests/test_sales.py b/tests/test_sales.py
+index c5bbc00..b3b0eda 100644
+--- a/tests/test_sales.py
++++ b/tests/test_sales.py
+@@ -11,6 +11,10 @@ class Summarise(unittest.TestCase):
+     def test_no_orders(self):
+         self.assertEqual(sales.summarise([]).splitlines()[:2], ["Orders: 0", "Revenue: $0.00"])
+ 
++    def test_average_order_line(self):
++        self.assertEqual(sales.summarise([{"cents": 1000}, {"cents": 2501}]).splitlines()[2], "Average order: $17.50")
++        self.assertEqual(sales.summarise([]).splitlines()[2], "Average order: $0.00")
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

@@ -1,0 +1,28 @@
+diff --git a/tests/test_wordcount.py b/tests/test_wordcount.py
+index 892c4b2..b43a47f 100644
+--- a/tests/test_wordcount.py
++++ b/tests/test_wordcount.py
+@@ -7,6 +7,13 @@ class CountWords(unittest.TestCase):
+     def test_single_spaces(self):
+         self.assertEqual(count_words("one two three"), 3)
+ 
++    def test_repeated_whitespace(self):
++        self.assertEqual(count_words("a  b\tc\nd"), 4)
++
++    def test_empty_and_blank(self):
++        self.assertEqual(count_words(""), 0)
++        self.assertEqual(count_words(" \t\n "), 0)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/wordcount.py b/wordcount.py
+index 0a83552..517a7b5 100644
+--- a/wordcount.py
++++ b/wordcount.py
+@@ -3,4 +3,4 @@
+ 
+ def count_words(text):
+     """Number of whitespace-separated words in text."""
+-    return len(text.split(" "))
++    return len(text.split())

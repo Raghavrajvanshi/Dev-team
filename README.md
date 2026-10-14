@@ -10,7 +10,7 @@ A goal-gated, token-lean software development team for Claude Code, packaged as 
 - **You are the highest authority.** Amend, pause, stop or change models at any time. Git writes happen only after you grant them; push, PR and deploy are asked every time.
 - Code quality is enforced, not requested: every agent loads a short craft charter (minimal, modular, no slop), and scope, locked tests and a close gate are checked by scripts.
 
-> **Status: v0.2.** Unit and CLI tests pass on macOS, Linux and Windows with Git for Windows (1075 tests, run by CI), and the plugin installs cleanly from this repo. The whole flow (intake, research, design, build, review, close) has run end to end, headlessly, in scratch repositories over several live passes; it has not yet been used interactively with your prompts and choices, and not on Windows under Claude Code. See [Status and known limits](#status-and-known-limits).
+> **Status: v0.2.** Unit and CLI tests pass on macOS, Linux and Windows with Git for Windows (1192 tests, run by CI; the eval harness's own file is skipped on Windows), and the plugin installs cleanly from this repo. The whole flow (intake, research, design, build, review, close) has run end to end, headlessly, in scratch repositories over several live passes; it has not yet been used interactively with your prompts and choices, and not on Windows under Claude Code. See [Status and known limits](#status-and-known-limits).
 
 ## How it works
 
@@ -258,7 +258,8 @@ Tracing is off by default and costs nothing; `dt trace on` (or `DT_TRACE=1`) mak
 ## Develop
 
 ```bash
-prove tests/                                        # 1075 tests
+prove tests/                                        # 1192 tests
+scripts/evals check                                 # the eval cases can fail and can pass (offline); see docs/EVALS.md
 claude plugin validate .                            # marketplace
 claude plugin validate plugins/devteam --strict     # plugin
 claude plugin validate plugins/devteam/skills --strict

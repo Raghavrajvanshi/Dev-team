@@ -2,6 +2,20 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.17] - 2026-10-14
+Evals (gap G3): the harness that measures the team against a plain session, five cases, and the page that says how. No result is claimed yet; see Notes.
+### Added
+- **`scripts/evals`** (a maintainer tool, not shipped in the plugin): `list`, `check`, `run` and `report`. `run` drives the working-tree plugin as the PM agent through three scripted answers per goal (`claude -p --resume`), runs a plain session with no plugin on the same goal and the same check commands, and records cost, turns, spawns, diff size, stray files and whether the criteria hold, per run, as small JSON files under `evals/results/`. `report` prints medians, cost ratios against the design's targets (tiny 1.3x, standard 2.5x), the diff size against a reference patch, and the change between two runs.
+- **`evals/`**: five cases with fixtures and reference patches: `tiny-fix`, `standard-feature`, `slop-fixture` (a seeded-slop task: a ready helper, a near-duplicate, a TODO), `no-goal` (idle team, plain question: nothing may spawn, and the always-on cost shows) and `tamper-attempt` (a criterion's check is rewritten to `true` outside `dt` after confirmation; the goal must not close verified).
+- **`scripts/evals check`** proves without a model call that every case can fail and can pass: each non-regression criterion fails on the fixture, all pass with the reference patch applied. It refused one of the five cases' criteria on its first run (an empty-output check that passed when the command did not exist).
+- **`docs/EVALS.md`**: method, cases, how to read the numbers, what is not covered, and a results block `scripts/evals report --write` fills.
+- `tests/evals.t` (117 tests): the cases, the runner against a fake `claude` (arms, flags, cumulative cost, scripted answers, early stop, the budget, tamper, stray files, nothing spent without `--yes`) and the report on synthetic results.
+### Notes
+- **Cost is read once.** In a resumed session `total_cost_usd` is cumulative and includes subagents (a recorded run: 0.19, 0.55, 0.57 after three turns), so summing the turns would count the first turn three times.
+- **Surveyed `claude plugin eval`**, which this is not built on: a case there is one prompt in an empty workspace with no way to answer a question, and a goal here is a conversation run as the PM. Repeated runs with a no-plugin baseline, a versioned JSON result, a cost ceiling and model pinning are adopted. Details in `docs/EVALS.md`.
+- **Not run yet.** The harness is tested offline end to end against a fake `claude`, but its first real sessions need the user's go-ahead (they are real spend, in nested sessions with permissions bypassed in scratch repositories). The register keeps G3 in progress until three runs per case with a baseline are recorded.
+- Still owed in G3: a user-facing page case scored on the design-quality rubric (needs a neutral judge for both arms), and the decision on a per-edit lint hook and a complexity-budget flag, which the slop fixture is there to inform.
+
 ## [0.2.16] - 2026-10-14
 Install ergonomics (gap G12): `/devteam:doctor`, and a README status line that is true. The demo and the directory submissions wait for G1 and G4.
 ### Added

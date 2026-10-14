@@ -1,0 +1,37 @@
+{
+  "name": "tiny-fix",
+  "kind": "goal",
+  "lane": "tiny",
+  "about": "A one-line bug fix in one file: the team's tiny lane against a plain session.",
+  "goal": "count_words in wordcount.py gives the wrong number when words are separated by more than one space, by tabs or by newlines, and it should return 0 for an empty or all-whitespace text. Fix it and add a test for those cases.",
+  "gate": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+  "criteria": [
+    {
+      "id": "C1",
+      "text": "WHEN words are separated by repeated spaces, tabs or newlines THEN count_words counts each word once",
+      "check": "PYTHONPATH=. python3 -c \"from wordcount import count_words as c; assert c('a  b\\tc\\nd') == 4 and c('  a b  ') == 2\""
+    },
+    {
+      "id": "C2",
+      "text": "WHEN the text is empty or only whitespace THEN count_words returns 0",
+      "check": "PYTHONPATH=. python3 -c \"from wordcount import count_words as c; assert c('') == 0 and c(' \\t\\n ') == 0\""
+    },
+    {
+      "id": "C3",
+      "text": "WHEN the test suite runs THEN it passes",
+      "check": "PYTHONPATH=. python3 -m unittest discover -s tests -q",
+      "regression": true
+    },
+    {
+      "id": "C4",
+      "text": "WHEN the fix is done THEN a test covers the new cases",
+      "check": "test \"$(grep -c 'def test' tests/test_wordcount.py)\" -ge 2"
+    }
+  ],
+  "target": {
+    "cost_ratio": 1.3
+  },
+  "allowed_new": [
+    "tests/*.py"
+  ]
+}
