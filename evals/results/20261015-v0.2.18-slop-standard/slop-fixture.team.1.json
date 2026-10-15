@@ -1,0 +1,59 @@
+{
+   "arm" : "team",
+   "case" : "slop-fixture",
+   "checks" : [
+      {
+         "id" : "C1",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C2",
+         "pass" : true,
+         "regression" : false
+      },
+      {
+         "id" : "C3",
+         "pass" : true,
+         "regression" : true
+      },
+      {
+         "id" : "C4",
+         "pass" : true,
+         "regression" : false
+      }
+   ],
+   "claude_turns" : 15,
+   "code_lines" : 5,
+   "cost_usd" : 0.569,
+   "criteria_pass" : true,
+   "diff_lines" : 19,
+   "duration_s" : 136,
+   "error" : false,
+   "files" : 2,
+   "goal_started" : true,
+   "kind" : "goal",
+   "lane" : "standard",
+   "main_msgs" : 21,
+   "model" : "sonnet",
+   "notes" : [],
+   "outcome" : "verified",
+   "pm_share" : 0.26,
+   "prompts" : 2,
+   "run" : 1,
+   "schema" : 1,
+   "spawns" : 5,
+   "status" : "IDLE",
+   "stray" : [],
+   "sub_msgs" : 15,
+   "tamper_events" : 0,
+   "test_lines" : 14,
+   "tokens" : {
+      "cache_read" : 856745,
+      "cache_write" : 85376,
+      "input" : 82,
+      "output" : 13240
+   },
+   "ts" : "2026-10-15T13:29:25Z",
+   "version" : "0.2.18"
+}

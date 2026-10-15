@@ -2,6 +2,21 @@
 
 All notable changes to the `devteam` plugin. The version is the one in `plugins/devteam/.claude-plugin/plugin.json`, and every version is a GitHub release (created with `scripts/release`).
 
+## [0.2.18] - 2026-10-15
+Evals, corrected (gap G3): the v0.2.17 numbers came from a protocol that inflated the team's cost. They are replaced, the harness is fixed, and the re-measured set found two things about the plugin itself.
+### Changed
+- **The harness no longer inflates the team's cost.** Reading where the PM's 27 turns went showed that sending the done-criteria in the confirmation made the Goal Keeper discard its own criteria and re-enter them (about five extra turns per goal). The criteria are now in the first message, as for the plain session. `--lane auto` names no lane and lets the Goal Keeper size the goal (the lane it chose is recorded and the target is that lane's).
+- A goal that closed before a tamper could be applied, a session the API refused (a usage limit) and a failed setup are marked `invalid` and set aside, not counted as a failure. `dt engage` is run with `--accept-others` (the scratch repository's own old transcripts made it refuse).
+- **README and `docs/EVALS.md` carry the corrected numbers.** v0.2.17 said a plain session was 2.4x to 9.9x cheaper; the corrected range is about 2x to 2.6x in the tiny lane and 5x to 9x in the standard lane, and 2.3x when the Goal Keeper was left to choose the lane for the 92-line feature.
+### Results (five runs per case and arm, three for the auto lane; Sonnet main thread; list-price estimates)
+- Every goal passed in both arms; no cost target is met. Team median against plain: `tiny-fix` $0.11 vs $0.06 (2.0x, target 1.3x), `slop-fixture` in the tiny lane $0.13 vs $0.05 (2.6x), the standard lane forced $0.36 to $0.50 vs $0.07 to $0.08 (5.3x to 6.5x, target 2.5x; 8.6x for the one-file slop change), idle team 0.87x.
+- **The Goal Keeper's sizing is inconsistent with the size of the goal**: left alone it chose the tiny lane for the 92-line multi-file feature (3 of 3, $0.18, 2.3x) and the standard lane for the 22-line feature (3 of 3, $0.48, 7.0x).
+- **"Goal first" is advisory while idle**: in 4 of 16 tiny-lane goal runs the PM made the whole change before any goal existed and opened the goal afterwards, and in 9 of 34 goal runs it confirmed the contract itself in the first turn. The `route` hook only reminds; nothing blocks an edit. Not fixed in this release (it is a finding, and a decision: how strict an engaged-and-idle team should be).
+- The team's code matches the plain session's on the small cases; the seeded-slop fixture provoked no slop in 26 runs; tampering was caught 3 of 3 (5 of 5 under the earlier protocol); a plain session left an empty `ordcount.py` in 4 of 5 `tiny-fix` runs (BSD `sed -i`), none of the team's did.
+### Notes
+- The register gains two gaps from these findings (goal gating while idle; the cost of a goal and lane sizing). The plugin itself is unchanged in this release.
+- A usage limit (HTTP 429) interrupted the last pair of one case in the v0.2.17 set; the harness now sets such sessions aside and says so in the report.
+
 ## [0.2.17] - 2026-10-14
 Evals (gap G3): the harness that measures the team against a plain session, six cases, and the first measured results. The plugin itself is unchanged; what changed is what is known about it, and it is not flattering.
 ### Added

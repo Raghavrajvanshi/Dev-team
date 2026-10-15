@@ -1,0 +1,70 @@
+{
+   "cases" : {
+      "standard-feature" : {
+         "case" : "standard-feature",
+         "code_ratio" : 1,
+         "cost_ratio" : 6.96486090775988,
+         "diff_ratio" : 1.95454545454545,
+         "kind" : "goal",
+         "lane" : "auto",
+         "lanes_chosen" : {
+            "standard" : 3
+         },
+         "plain" : {
+            "code_lines" : 11,
+            "cost" : 0.0683,
+            "cost_all" : 0.0683,
+            "diff_lines" : 26,
+            "duration_s" : 16,
+            "main_msgs" : 4,
+            "out_tokens" : 1600,
+            "outcomes" : {
+               "n/a" : 3
+            },
+            "passed" : 3,
+            "pm_share" : null,
+            "runs" : 3,
+            "spawns" : 0,
+            "stray_max" : 0,
+            "stray_runs" : 0,
+            "sub_msgs" : 0,
+            "test_lines" : 15,
+            "turns" : 4
+         },
+         "plain_diff_ratio" : 1.18181818181818,
+         "reference_code" : 11,
+         "reference_lines" : 22,
+         "reference_tests" : 11,
+         "target" : {
+            "cost_ratio" : 2.5
+         },
+         "team" : {
+            "code_lines" : 11,
+            "cost" : 0.4757,
+            "cost_all" : 0.4757,
+            "diff_lines" : 43,
+            "duration_s" : 131,
+            "main_msgs" : 21,
+            "out_tokens" : 13952,
+            "outcomes" : {
+               "verified" : 3
+            },
+            "passed" : 3,
+            "pm_share" : 0.29,
+            "runs" : 3,
+            "spawns" : 5,
+            "stray_max" : 0,
+            "stray_runs" : 0,
+            "sub_msgs" : 14,
+            "test_lines" : 33,
+            "turns" : 15
+         }
+      }
+   },
+   "invalid" : 0,
+   "model" : "sonnet",
+   "partial" : false,
+   "schema" : 1,
+   "ts" : "2026-10-15T13:40:42Z",
+   "version" : "0.2.18"
+}

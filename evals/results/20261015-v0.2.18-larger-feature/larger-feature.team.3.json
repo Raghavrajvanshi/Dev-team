@@ -1,0 +1,70 @@
+{
+   "arm": "team",
+   "case": "larger-feature",
+   "checks": [
+      {
+         "id": "C1",
+         "pass": true,
+         "regression": false
+      },
+      {
+         "id": "C2",
+         "pass": true,
+         "regression": false
+      },
+      {
+         "id": "C3",
+         "pass": true,
+         "regression": false
+      },
+      {
+         "id": "C4",
+         "pass": true,
+         "regression": false
+      },
+      {
+         "id": "C5",
+         "pass": true,
+         "regression": true
+      },
+      {
+         "id": "C6",
+         "pass": true,
+         "regression": false
+      }
+   ],
+   "claude_turns": 19,
+   "code_lines": 57,
+   "cost_usd": 0.6544,
+   "criteria_pass": true,
+   "diff_lines": 174,
+   "duration_s": 196,
+   "error": false,
+   "files": 4,
+   "goal_started": true,
+   "kind": "goal",
+   "lane": "standard",
+   "main_msgs": 24,
+   "model": "sonnet",
+   "notes": [],
+   "outcome": "verified",
+   "pm_share": 0.28,
+   "prompts": 2,
+   "run": 3,
+   "schema": 1,
+   "spawns": 6,
+   "status": "IDLE",
+   "stray": [],
+   "stray_note": "inventory.py was outside the reference footprint but is a natural home for the helpers; the case's allowed list was extended afterwards and this field recomputed",
+   "sub_msgs": 20,
+   "tamper_events": 0,
+   "test_lines": 117,
+   "tokens": {
+      "cache_read": 1134685,
+      "cache_write": 83808,
+      "input": 100,
+      "output": 22652
+   },
+   "ts": "2026-10-15T13:35:32Z",
+   "version": "0.2.18"
+}

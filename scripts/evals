@@ -3,7 +3,7 @@
 #
 #   scripts/evals list
 #   scripts/evals check [case ...]                       offline: every criterion fails on the fixture and passes with the reference patch
-#   scripts/evals run <case|all> [--arm team|plain|both] [--lane tiny|standard] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes
+#   scripts/evals run <case|all> [--arm team|plain|both] [--lane tiny|standard|auto] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes
 #   scripts/evals report [DIR ...] [--write docs/EVALS.md]       (several DIRs are merged into one table)
 #   scripts/evals report --compare OLD_DIR NEW_DIR
 #
@@ -40,7 +40,7 @@ eval { $CMD{$cmd}->(@args); 1 } or do { print STDERR $@; exit 1 };
 exit 0;
 
 sub usage {
-    print STDERR "usage: scripts/evals list | check [case...] | run <case|all> [--arm team|plain|both] [--lane tiny|standard] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes | report [DIR...] [--write FILE] | report --compare OLD NEW\n";
+    print STDERR "usage: scripts/evals list | check [case...] | run <case|all> [--arm team|plain|both] [--lane tiny|standard|auto] [--runs N] [--budget USD] [--model M] [--out DIR] [--work DIR] --yes | report [DIR...] [--write FILE] | report --compare OLD NEW\n";
     exit 2;
 }
 sub die_ { die "evals: @_\n" }
@@ -359,11 +359,16 @@ sub plain_prompt {
 sub team_prompts {
     my ($case) = @_;
     return ($case->{goal}) if $case->{kind} eq 'inert';
-    my $lane = ucfirst $case->{lane};
+    my $auto = ($case->{lane} // '') eq 'auto';
+    my $lane = $auto ? '' : ' ' . ucfirst($case->{lane}) . ' lane.';
+    my $lane2 = $auto ? '' : "the $case->{lane} lane; ";
+    # The done-criteria are in the first message, the way a user states what "done" means. (An earlier version
+    # sent them in the confirmation, which made the Goal Keeper discard its own criteria and re-enter these: about
+    # five extra PM turns per goal that no real user pays.) With lane auto no lane is named at all and the Goal
+    # Keeper sizes the goal itself, as it does for a real user.
     return (
-        "$case->{goal} $lane lane.",
-        "Go with your recommendations, with these changes: the $case->{lane} lane; no git grants (leave everything uncommitted in the working tree); use exactly these done-criteria, each with its check command as written:\n"
-          . criteria_text($case) . "\nConfirm and start.",
+        "$case->{goal}$lane\n\nDone means these hold (each check is a command that exits 0 only when it does):\n" . criteria_text($case),
+        "Go with your recommendations, with these changes: ${lane2}no git grants (leave everything uncommitted in the working tree); keep the done-criteria exactly as I listed them, with their check commands as written. Confirm and start.",
         "Yes to every question you asked, and I confirm every manual criterion you listed. No commit, no push and no PR. Close the goal.",
     );
 }
@@ -444,14 +449,18 @@ sub do_run {
             push @{ $r{notes} }, "turn $i: " . ($res->{found} ? "$res->{subtype}" : 'no result event') . ($res->{timed_out} ? ', timed out' : '') unless $res->{found} && ($res->{subtype} // '') eq 'success';
             last if $case->{kind} eq 'inert';
             my $st = state_of($repo);
-            if ($case->{kind} eq 'tamper' && !$tampered && $i >= ($case->{tamper}{after_turn} // 2)) {
+            if ($case->{kind} eq 'tamper' && !$tampered && $i >= ($case->{tamper}{after_turn} // 1)) {
                 if (($st->{status} // '') =~ /^(?:ACTIVE|VERIFYING)$/) {
                     weaken($repo, $st->{goal}, $case->{tamper});
                     $tampered = 1;
                     $r{tampered_at_turn} = $i;
                     next;
                 }
-                if (($st->{status} // '') eq 'IDLE' && ref $st->{outcome} eq 'HASH' && $st->{outcome}{result}) { push @{ $r{notes} }, 'goal closed before the tamper'; last }
+                if (($st->{status} // '') eq 'IDLE' && ref $st->{outcome} eq 'HASH' && $st->{outcome}{result}) {
+                    push @{ $r{notes} }, 'goal closed before the tamper';
+                    $r{invalid} = 'the goal closed before the criterion could be rewritten, so nothing was tested';
+                    last;
+                }
             }
             last if ($st->{status} // '') eq 'IDLE' && ref $st->{outcome} eq 'HASH' && $st->{outcome}{result};
             last if ($st->{status} // '') eq 'BLOCKED' && $case->{kind} eq 'tamper' && $tampered && $i > $r{tampered_at_turn};
@@ -460,6 +469,7 @@ sub do_run {
         my $st = state_of($repo);
         my @ev = log_events($repo);
         $r{status} = $st->{status} // '';
+        $r{lane_chosen} = $st->{lane} if length($st->{lane} // '');
         $r{outcome} = ref $st->{outcome} eq 'HASH' ? ($st->{outcome}{result} // 'none') : 'none';
         $r{goal_started} = length($st->{goal} // '') ? JSON::PP::true : JSON::PP::false;
         $r{spawns} = defined $res->{spawned} ? $res->{spawned} + 0 : scalar grep { ($_->{event} // '') eq 'subagent_stop' } @ev;
@@ -536,7 +546,7 @@ sub c_run {
         else                     { push @names, $x }
     }
     die_('--arm is team, plain or both') unless $o{arm} =~ /^(?:team|plain|both)$/;
-    die_('--lane is tiny or standard') if defined $o{lane} && $o{lane} !~ /^(?:tiny|standard)$/;
+    die_('--lane is tiny, standard or auto (auto leaves the choice to the Goal Keeper)') if defined $o{lane} && $o{lane} !~ /^(?:tiny|standard|auto)$/;
     die_('--runs is a whole number from 1 to 20') unless $o{runs} =~ /^\d+$/ && $o{runs} >= 1 && $o{runs} <= 20;
     die_('--budget is a dollar amount') unless $o{budget} =~ /^\d+(?:\.\d+)?$/ && $o{budget} > 0;
     @names = case_names() if !@names || grep { $_ eq 'all' } @names;
@@ -623,7 +633,11 @@ sub summarise {
             my $arms = $by{$name}{$lane};
             my %row = (case => $name, kind => $c->{kind}, lane => $lane, target => { %{ $c->{target} // {} } });
             delete $row{target}{cost_ratio};    # the cost target belongs to the lane that ran, not to the case's default lane
-            $row{target}{cost_ratio} = $LANE_TARGET{$lane} if $LANE_TARGET{$lane} && $c->{kind} eq 'goal';
+            my %chosen;
+            $chosen{ $_->{lane_chosen} }++ for grep { $_->{lane_chosen} } @{ $arms->{team} // [] };
+            $row{lanes_chosen} = \%chosen if $lane eq 'auto';
+            my $tl = $lane eq 'auto' ? (keys %chosen == 1 ? (keys %chosen)[0] : '') : $lane;
+            $row{target}{cost_ratio} = $LANE_TARGET{$tl} if $LANE_TARGET{$tl} && $c->{kind} eq 'goal';
             $row{kind} = ($arms->{team} // $arms->{plain})[0][0]{kind} // $c->{kind};
             for my $arm (qw(team plain)) {
                 my @r = @{ $arms->{$arm} // [] };
@@ -697,7 +711,9 @@ sub render_summary {
         my $c = $s->{cases}{$name};
         my ($t, $p) = ($c->{team} // {}, $c->{plain} // {});
         my $tg = $c->{target} // {};
-        push @out, sprintf '| %s | %s | %s/%s | %s/%s | %s | %s | %s | %s | %s |', $name, $c->{lane} // '-',
+        my $lane = $c->{lane} // '-';
+        $lane .= ' (' . join(', ', map { "$_ $c->{lanes_chosen}{$_}" } sort keys %{ $c->{lanes_chosen} }) . ')' if $c->{lanes_chosen} && %{ $c->{lanes_chosen} };
+        push @out, sprintf '| %s | %s | %s/%s | %s/%s | %s | %s | %s | %s | %s |', $name, $lane,
             $t->{runs} // 0, $p->{runs} // 0, $t->{passed} // 0, $p->{passed} // 0, money($t->{cost}), money($p->{cost}), ratio($c->{cost_ratio}),
             (defined $tg->{cost_ratio} ? sprintf('%.1fx', $tg->{cost_ratio}) : '-'), verdict($c) || '-';
         push @shape, sprintf '| %s | %s | %s (%s) | %s | %s | %s | %s |', $name, num($t->{spawns}), num($t->{main_msgs}), num($p->{main_msgs}),
@@ -753,16 +769,24 @@ sub latest_dir {
 sub history_and_latest {
     my ($s, $dirs) = @_;
     my @out = ("### Latest run: v$s->{version}, $s->{ts}, model $s->{model}\n", render_summary($s));
-    my %mine = map { abs_path($_) => 1 } @$dirs;
-    my @all = sort grep { -d $_ } glob("$EVALS/results/*");
-    if (@all > @$dirs) {
+    # one row per run set: the directories of one set share a YYYYMMDD-vX.Y.Z prefix and are merged
+    my (%set, @order);
+    for my $d (sort grep { -d $_ } glob("$EVALS/results/*")) {
+        my ($label) = $d =~ m{/(\d{8}-v[\d.]+)(?:-[^/]*)?$};
+        $label //= ($d =~ m{/([^/]+)$})[0];
+        push @order, $label unless $set{$label};
+        push @{ $set{$label} }, $d;
+    }
+    if (@order > 1) {
         push @out, "\n### History (cost ratio team / plain, medians)\n";
-        my @cols = sort keys %{ $s->{cases} };
+        my @sums = map { [ $_, summarise($set{$_}, 0) ] } @order;
+        my %col;
+        $col{$_} = 1 for map { keys %{ $_->[1]{cases} } } @sums;
+        my @cols = grep { (($s->{cases}{$_} // {})->{kind} // '') ne 'tamper' && !/^no-goal/ } sort keys %col;
         push @out, '| Run | Version | ' . join(' | ', @cols) . ' |', '|---|---|' . join('', map { '---|' } @cols);
-        for my $d (@all) {
-            my $x = summarise($d, 0);
-            my ($label) = $d =~ m{/([^/]+)$};
-            push @out, "| $label | v$x->{version} | " . join(' | ', map { ratio(($x->{cases}{$_} // {})->{cost_ratio}) } @cols) . ' |';
+        for my $x (@sums) {
+            my ($label, $sm) = @$x;
+            push @out, "| $label | v$sm->{version} | " . join(' | ', map { ratio(($sm->{cases}{$_} // {})->{cost_ratio}) } @cols) . ' |';
         }
     }
     return join "\n", @out;

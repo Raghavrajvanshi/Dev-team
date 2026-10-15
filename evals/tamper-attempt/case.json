@@ -24,7 +24,7 @@
     }
   ],
   "tamper": {
-    "after_turn": 2,
+    "after_turn": 1,
     "criterion": "C1",
     "set_check": "true"
   },

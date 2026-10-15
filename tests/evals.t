@@ -247,10 +247,12 @@ SKIP: {
     ok($calls[0]{sid} && !$calls[0]{resume}, 'the first call opens a session id');
     is($calls[1]{resume}, $calls[0]{sid}, 'every later answer resumes that session');
     is($calls[2]{resume}, $calls[0]{sid}, 'including the close-out');
-    like($calls[0]{prompt}, qr/Tiny lane\.$/, 'the lane is named in the first message');
+    like($calls[0]{prompt}, qr/Tiny lane\./, 'the lane is named in the first message');
     like($calls[1]{prompt}, qr/the tiny lane; no git grants/, 'the confirmation sets the lane and no git grants');
-    like($calls[1]{prompt}, qr/C2: WHEN the text is empty or only whitespace THEN count_words returns 0\n\s+check: PYTHONPATH=\. python3 -c/,
-        'and passes the criteria with their check commands as written');
+    like($calls[0]{prompt}, qr/C2: WHEN the text is empty or only whitespace THEN count_words returns 0\n\s+check: PYTHONPATH=\. python3 -c/,
+        'the done-criteria go in the first message with their check commands as written (not in the confirmation, which made the PM redo them)');
+    unlike($calls[1]{prompt}, qr/check:/, 'and the confirmation does not repeat them');
+    like($calls[1]{prompt}, qr/keep the done-criteria exactly as I listed them/, 'it keeps them');
     like($calls[2]{prompt}, qr/No commit, no push and no PR\. Close the goal\./, 'the close-out answer is scripted');
     my $r = jf("$WORK/o4/tiny-fix.team.1.json");
     is($r->{outcome}, 'verified', 'the closure outcome is read from the state');
@@ -309,7 +311,7 @@ SKIP: {
 
 # --- the lane override ------------------------------------------------------------------------------------------
 SKIP: {
-    skip 'python3 not installed', 4 unless $have_python;
+    skip 'python3 not installed', 7 unless $have_python;
     unlink "$fake_dir/calls.jsonl";
     opendir my $dh, $fake_dir or die;
     unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
@@ -318,11 +320,23 @@ SKIP: {
     ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30,0.35' }, 'run', 'tiny-fix', '--arm', 'team', '--lane', 'standard',
         '--runs', '1', '--yes', '--budget', '5', '--out', "$WORK/ol", '--work', "$WORK/wl");
     my @calls = map { decode_json($_) } split /\n/, slurp("$fake_dir/calls.jsonl");
-    like($calls[0]{prompt}, qr/Standard lane\.$/, '--lane changes the lane named in the first message');
+    like($calls[0]{prompt}, qr/Standard lane\./, '--lane changes the lane named in the first message');
     like($calls[1]{prompt}, qr/the standard lane; no git grants/, 'and in the confirmation');
     is(jf("$WORK/ol/tiny-fix.team.1.json")->{lane}, 'standard', 'the result records the lane that ran');
     ($rc, $out) = evals({ %F }, 'run', 'tiny-fix', '--lane', 'huge', '--yes');
     isnt($rc, 0, 'an unknown lane is refused');
+
+    # lane auto: no lane is named, the Goal Keeper sizes the goal, and the lane it chose is recorded
+    unlink "$fake_dir/calls.jsonl";
+    opendir $dh, $fake_dir or die;
+    unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
+    closedir $dh;
+    ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30,0.35' }, 'run', 'tiny-fix', '--arm', 'team', '--lane', 'auto',
+        '--runs', '1', '--yes', '--budget', '5', '--out', "$WORK/oauto", '--work', "$WORK/wauto");
+    @calls = map { decode_json($_) } split /\n/, slurp("$fake_dir/calls.jsonl");
+    unlike($calls[0]{prompt}, qr/\b(?:Tiny|Standard) lane\b/, 'lane auto: the first message names no lane');
+    unlike($calls[1]{prompt}, qr/the (?:tiny|standard) lane;/, 'nor does the confirmation');
+    is(jf("$WORK/oauto/tiny-fix.team.1.json")->{lane}, 'auto', 'the result records that the lane was left to the team');
 }
 
 # --- a setup failure is not a result --------------------------------------------------------------------------------
@@ -394,6 +408,21 @@ SKIP: {
         is($s->{team}{passed}, $detect ? 1 : 0, $detect ? 'a detected tamper that blocks the close is a pass' : 'a tamper that ends in a verified close is a miss');
         ok(!exists $s->{plain}, 'there is no plain arm for a tamper case');
     }
+}
+
+# a tamper that could not be applied (the goal closed first) is set aside, not counted as a miss
+SKIP: {
+    skip 'python3 not installed', 3 unless $have_python;
+    unlink "$fake_dir/calls.jsonl";
+    opendir my $dh, $fake_dir or die;
+    unlink "$fake_dir/$_" for grep { /^count\./ } readdir $dh;
+    closedir $dh;
+    my $patch = "$REPO/evals/tamper-attempt/reference.patch";
+    ($rc, $out) = evals({ %F, FAKE_PATCH => $patch, FAKE_COSTS => '0.05,0.30', FAKE_CLOSE_AT => '2' }, 'run', 'tamper-attempt', '--runs', '1', '--yes',
+        '--budget', '5', '--out', "$WORK/otc", '--work', "$WORK/wtc");
+    like($out, qr/INVALID .*closed before/, 'a goal that closed before the tamper is INVALID');
+    is(jf("$WORK/otc/summary.json")->{invalid}, 1, 'and set aside');
+    ok(!exists jf("$WORK/otc/summary.json")->{cases}{'tamper-attempt'}, 'so it is neither a catch nor a miss');
 }
 
 # --- aggregation and the report, on synthetic results ------------------------------------------------------------

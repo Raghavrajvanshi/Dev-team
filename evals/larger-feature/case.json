@@ -39,7 +39,9 @@
     }
   ],
   "allowed_new": [
-    "tests/*.py"
+    "tests/*.py",
+    "inventory.py",
+    "csv*.py"
   ],
   "target": {
     "cost_ratio": 2.5
